@@ -1,2 +1,4 @@
 .claude/scheduled_tasks.lock
 worktrees/
+.claude/
+.qodo/

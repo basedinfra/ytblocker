@@ -39,3 +39,9 @@ html.ytb-hide-playables ytd-guide-entry-renderer:has(a[title="Playables"]),
 html.ytb-hide-playables ytd-mini-guide-entry-renderer:has(a[title="Playables"]) {
   display: none !important;
 }
+
+ytd-rich-shelf-renderer[data-ytb-primetime-blocked="true"],
+ytd-rich-section-renderer[data-ytb-primetime-blocked="true"],
+ytd-shelf-renderer[data-ytb-primetime-blocked="true"] {
+  display: none !important;
+}

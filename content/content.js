@@ -57,12 +57,20 @@
     channelBlockingEnabled: false,
     dismissalDelayMinSeconds: 3,
     dismissalDelayMaxSeconds: 7,
+    videoDurationMinSeconds: -1,
+    videoDurationMaxSeconds: -1,
+    videoAgeMinDays: -1,
+    videoAgeMaxDays: -1,
     keywords: [],
     blockedChannels: [],
   };
 
   const DEFAULT_DISMISSAL_DELAY_MIN_SECONDS = 3;
   const DEFAULT_DISMISSAL_DELAY_MAX_SECONDS = 7;
+  const DEFAULT_VIDEO_DURATION_MIN_SECONDS = -1;
+  const DEFAULT_VIDEO_DURATION_MAX_SECONDS = -1;
+  const DEFAULT_VIDEO_AGE_MIN_DAYS = -1;
+  const DEFAULT_VIDEO_AGE_MAX_DAYS = -1;
   const MAX_FILTER_ACTIONS_PER_PAGE = 10;
   const SCROLL_RESTORE_SETTLE_MS = 2000;
   const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"];
@@ -166,6 +174,10 @@
         channelBlockingEnabled: false,
         dismissalDelayMinSeconds: DEFAULT_DISMISSAL_DELAY_MIN_SECONDS,
         dismissalDelayMaxSeconds: DEFAULT_DISMISSAL_DELAY_MAX_SECONDS,
+        videoDurationMinSeconds: DEFAULT_VIDEO_DURATION_MIN_SECONDS,
+        videoDurationMaxSeconds: DEFAULT_VIDEO_DURATION_MAX_SECONDS,
+        videoAgeMinDays: DEFAULT_VIDEO_AGE_MIN_DAYS,
+        videoAgeMaxDays: DEFAULT_VIDEO_AGE_MAX_DAYS,
         keywords: [],
         blockedChannels: [],
       },
@@ -177,6 +189,10 @@
           channelBlockingEnabled: settings.channelBlockingEnabled,
           dismissalDelayMinSeconds: settings.dismissalDelayMinSeconds,
           dismissalDelayMaxSeconds: settings.dismissalDelayMaxSeconds,
+          videoDurationMinSeconds: settings.videoDurationMinSeconds,
+          videoDurationMaxSeconds: settings.videoDurationMaxSeconds,
+          videoAgeMinDays: settings.videoAgeMinDays,
+          videoAgeMaxDays: settings.videoAgeMaxDays,
           keywords: settings.keywords,
           blockedChannels: settings.blockedChannels,
         }));
@@ -200,7 +216,11 @@
       "keywordDismissalEnabled" in changes ||
       "blockedChannels" in changes ||
       "channelBlockingEnabled" in changes ||
-      "playlistDismissalEnabled" in changes
+      "playlistDismissalEnabled" in changes ||
+      "videoDurationMinSeconds" in changes ||
+      "videoDurationMaxSeconds" in changes ||
+      "videoAgeMinDays" in changes ||
+      "videoAgeMaxDays" in changes
     ) {
       resetDismissalQueue(true);
       if (
@@ -218,10 +238,10 @@
         delete el.dataset.ytbScanned;
         delete el.dataset.ytbChannelScanned;
         delete el.dataset.ytbPlaylistScanned;
+        delete el.dataset.ytbDurationScanned;
+        delete el.dataset.ytbAgeScanned;
       });
-      scanForKeywordMatches();
-      scanForChannelMatches();
-      scanForPlaylistMatches();
+      runAllScans();
     }
 
     if ("primetimeBlocked" in changes && currentPageType === "feed") {
@@ -294,6 +314,16 @@
     )) || "";
   }
 
+  function isElementInViewport(el) {
+    const rect = el.getBoundingClientRect();
+    return (
+      rect.bottom > 0 &&
+      rect.top < window.innerHeight &&
+      rect.right > 0 &&
+      rect.left < window.innerWidth
+    );
+  }
+
   function enqueueVideoMatch(videoEl, matchType, matchedText) {
     console.log("[YTBlocker] " + matchType + " match:", matchedText);
     if (currentPageType === "search") {
@@ -304,6 +334,10 @@
       // Watch sidebar matching is hide-only because dismissal clicks can
       // navigate the main player.
       enqueueFilterAction(videoEl, "hide");
+    } else if (!isElementInViewport(videoEl)) {
+      // Offscreen menu clicks are what cause YouTube to snap the viewport to
+      // newly-loaded matches. Keep those background mutations DOM-only.
+      enqueueFilterAction(videoEl, "remove");
     } else {
       enqueueFilterAction(videoEl, "dismiss");
     }
@@ -376,6 +410,254 @@
 
     if (newCount > 0) {
       console.log("[YTBlocker] Channel scan: total=" + allVideos.length + " alreadyScanned=" + scannedCount + " new=" + newCount + " queueSize=" + dismissalQueue.length);
+    }
+  }
+
+  // --- Duration Matching ---
+
+  function normalizeDurationBound(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0) return -1;
+    return Math.round(number);
+  }
+
+  function hasDurationFilterEnabled() {
+    return (
+      normalizeDurationBound(settings.videoDurationMinSeconds) >= 0 ||
+      normalizeDurationBound(settings.videoDurationMaxSeconds) >= 0
+    );
+  }
+
+  function parseClockDuration(text) {
+    const match = String(text).match(/\b\d+(?::\d{1,2}){1,2}\b/);
+    if (!match) return null;
+
+    const parts = match[0].split(":").map((part) => Number.parseInt(part, 10));
+    if (parts.some((part) => !Number.isFinite(part))) return null;
+    if (parts.slice(1).some((part) => part > 59)) return null;
+
+    return parts.reduce((total, part) => (total * 60) + part, 0);
+  }
+
+  function parseDurationLabel(label) {
+    const text = String(label).toLowerCase();
+    if (/\b(ago|views?|subscribers?|watching)\b/.test(text)) return null;
+
+    const units = {
+      hour: 3600,
+      hours: 3600,
+      minute: 60,
+      minutes: 60,
+      second: 1,
+      seconds: 1,
+    };
+    let totalSeconds = 0;
+    let matched = false;
+    const pattern = /(\d+)\s*(hours?|minutes?|seconds?)/g;
+    let match;
+
+    while ((match = pattern.exec(text)) !== null) {
+      totalSeconds += Number.parseInt(match[1], 10) * units[match[2]];
+      matched = true;
+    }
+
+    return matched ? totalSeconds : null;
+  }
+
+  function getVideoDurationSeconds(videoEl) {
+    const durationSelectors = [
+      "ytd-thumbnail-overlay-time-status-renderer #text",
+      "ytd-thumbnail-overlay-time-status-renderer",
+      "ytm-thumbnail-overlay-time-status-renderer",
+      ".badge-shape-wiz__text",
+      ".yt-badge-shape__text",
+      ".ytThumbnailOverlayTimeStatusRendererHost",
+    ];
+
+    for (const selector of durationSelectors) {
+      const durationEl = videoEl.querySelector(selector);
+      if (!durationEl) continue;
+
+      const clockDurationSeconds = parseClockDuration(durationEl.textContent);
+      if (clockDurationSeconds !== null) return clockDurationSeconds;
+
+      const durationSeconds = parseDurationLabel(
+        durationEl.getAttribute("aria-label") || ""
+      );
+      if (durationSeconds !== null) return durationSeconds;
+    }
+
+    const ariaDurationEls = videoEl.querySelectorAll("[aria-label]");
+    for (const el of ariaDurationEls) {
+      const durationSeconds = parseDurationLabel(
+        el.getAttribute("aria-label") || ""
+      );
+      if (durationSeconds !== null) return durationSeconds;
+    }
+
+    return parseClockDuration(videoEl.textContent);
+  }
+
+  function isDurationWithinBounds(durationSeconds) {
+    const minSeconds = normalizeDurationBound(settings.videoDurationMinSeconds);
+    const maxSeconds = normalizeDurationBound(settings.videoDurationMaxSeconds);
+
+    if (minSeconds >= 0 && durationSeconds < minSeconds) return false;
+    if (maxSeconds >= 0 && durationSeconds > maxSeconds) return false;
+    return true;
+  }
+
+  function scanForDurationMatches() {
+    if (!hasDurationFilterEnabled()) return;
+
+    const allVideos = document.querySelectorAll(VIDEO_SELECTOR);
+    let scannedCount = 0;
+    let queuedCount = 0;
+
+    allVideos.forEach((el) => {
+      if (el.dataset.ytbDurationScanned) { scannedCount++; return; }
+
+      const durationSeconds = getVideoDurationSeconds(el);
+      if (durationSeconds === null) return;
+
+      el.dataset.ytbDurationScanned = "true";
+
+      if (!isDurationWithinBounds(durationSeconds)) {
+        console.log(
+          "[YTBlocker] Duration match queued:",
+          getVideoTitle(el) || "(unknown)",
+          "durationSeconds=" + durationSeconds
+        );
+        enqueueFilterAction(el, "remove");
+        queuedCount++;
+      }
+    });
+
+    if (queuedCount > 0) {
+      console.log(
+        "[YTBlocker] Duration scan: total=" +
+          allVideos.length +
+          " alreadyScanned=" +
+          scannedCount +
+          " queued=" +
+          queuedCount
+      );
+      processQueue();
+    }
+  }
+
+  // --- Creation Date Matching ---
+
+  function normalizeAgeBound(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0) return -1;
+    return number;
+  }
+
+  function hasAgeFilterEnabled() {
+    return (
+      normalizeAgeBound(settings.videoAgeMinDays) >= 0 ||
+      normalizeAgeBound(settings.videoAgeMaxDays) >= 0
+    );
+  }
+
+  function parseVideoAgeLabel(label) {
+    const text = normalizeText(String(label).toLowerCase());
+    if (!text) return null;
+    if (/\btoday\b/.test(text)) return 0;
+    if (/\byesterday\b/.test(text)) return 1;
+
+    const match = text.match(
+      /\b(\d+(?:\.\d+)?)\s*(second|minute|hour|day|week|month|year)s?\s+ago\b/
+    );
+    if (!match) return null;
+
+    const amount = Number(match[1]);
+    const units = {
+      second: 1 / 86400,
+      minute: 1 / 1440,
+      hour: 1 / 24,
+      day: 1,
+      week: 7,
+      month: 30,
+      year: 365,
+    };
+
+    return amount * units[match[2]];
+  }
+
+  function getVideoAgeDays(videoEl) {
+    const ageSelectors = [
+      "#metadata-line span",
+      "ytd-video-meta-block span",
+      "yt-content-metadata-view-model span",
+      ".inline-metadata-item",
+      ".yt-lockup-metadata-view-model__metadata",
+      ".ytContentMetadataViewModelMetadataRow span",
+    ];
+
+    for (const selector of ageSelectors) {
+      const ageEls = videoEl.querySelectorAll(selector);
+      for (const ageEl of ageEls) {
+        const ageDays = parseVideoAgeLabel(getElementLabel(ageEl));
+        if (ageDays !== null) return ageDays;
+      }
+    }
+
+    const ariaEls = videoEl.querySelectorAll("[aria-label]");
+    for (const el of ariaEls) {
+      const ageDays = parseVideoAgeLabel(el.getAttribute("aria-label") || "");
+      if (ageDays !== null) return ageDays;
+    }
+
+    return parseVideoAgeLabel(videoEl.textContent);
+  }
+
+  function isAgeWithinBounds(ageDays) {
+    const minDays = normalizeAgeBound(settings.videoAgeMinDays);
+    const maxDays = normalizeAgeBound(settings.videoAgeMaxDays);
+
+    if (minDays >= 0 && ageDays < minDays) return false;
+    if (maxDays >= 0 && ageDays > maxDays) return false;
+    return true;
+  }
+
+  function scanForAgeMatches() {
+    if (!hasAgeFilterEnabled()) return;
+
+    const allVideos = document.querySelectorAll(VIDEO_SELECTOR);
+    let scannedCount = 0;
+    let queuedCount = 0;
+
+    allVideos.forEach((el) => {
+      if (el.dataset.ytbAgeScanned) { scannedCount++; return; }
+
+      const ageDays = getVideoAgeDays(el);
+      if (ageDays === null) return;
+
+      el.dataset.ytbAgeScanned = "true";
+
+      if (!isAgeWithinBounds(ageDays)) {
+        console.log(
+          "[YTBlocker] Creation date match queued:",
+          getVideoTitle(el) || "(unknown)",
+          "ageDays=" + ageDays
+        );
+        enqueueFilterAction(el, "remove");
+        queuedCount++;
+      }
+    });
+
+    if (queuedCount > 0) {
+      console.log(
+        "[YTBlocker] Creation date scan: total=" +
+          allVideos.length +
+          " alreadyScanned=" +
+          scannedCount +
+          " queued=" +
+          queuedCount
+      );
+      processQueue();
     }
   }
 
@@ -479,7 +761,14 @@
         "items=" + (playlistCount || "unknown"),
         "id=" + (playlistId || "(unknown)")
       );
-      enqueueFilterAction(el, "block-playlist", 0, { playlistId });
+      if (!isElementInViewport(el)) {
+        if (playlistId) {
+          blockedPlaylistIds.add(playlistId);
+        }
+        enqueueFilterAction(el, "remove", 0, { playlistId });
+      } else {
+        enqueueFilterAction(el, "block-playlist", 0, { playlistId });
+      }
       matched = true;
     });
 
@@ -504,6 +793,7 @@
   ];
 
   const PRIMETIME_SHELF_SELECTOR = PRIMETIME_SHELF_SELECTORS.join(", ");
+  const PRIMETIME_BLOCKED_ATTR = "data-ytb-primetime-blocked";
 
   function isPrimetimeShelf(el) {
     const titleEl =
@@ -514,12 +804,43 @@
     return titleEl.textContent.trim().toLowerCase().includes("primetime");
   }
 
+  function blockPrimetimeShelf(shelf) {
+    shelf.setAttribute(PRIMETIME_BLOCKED_ATTR, "true");
+    shelf.style.opacity = "";
+    shelf.style.pointerEvents = "";
+  }
+
+  function clearPrimetimeShelfBlock(shelf) {
+    shelf.removeAttribute(PRIMETIME_BLOCKED_ATTR);
+    delete shelf.dataset.ytbPrimetimeScanned;
+    shelf.style.opacity = "";
+    shelf.style.pointerEvents = "";
+  }
+
+  function clearPrimetimeShelfBlocks() {
+    document.querySelectorAll(PRIMETIME_SHELF_SELECTOR).forEach((shelf) => {
+      if (
+        shelf.hasAttribute(PRIMETIME_BLOCKED_ATTR) ||
+        (shelf.style.opacity === "0" && shelf.style.pointerEvents === "none")
+      ) {
+        clearPrimetimeShelfBlock(shelf);
+      }
+    });
+  }
+
   function scanForPrimetimeMovies() {
-    if (!settings.primetimeBlocked) return;
+    if (!settings.primetimeBlocked) {
+      clearPrimetimeShelfBlocks();
+      return;
+    }
 
     const shelves = document.querySelectorAll(PRIMETIME_SHELF_SELECTOR);
 
     for (const shelf of shelves) {
+      if (shelf.style.opacity === "0" && shelf.style.pointerEvents === "none") {
+        blockPrimetimeShelf(shelf);
+      }
+
       if (shelf.dataset.ytbPrimetimeScanned) continue;
       if (!isPrimetimeShelf(shelf)) {
         // Only skip future scans if the title element exists (i.e. loaded but not primetime).
@@ -535,8 +856,7 @@
       shelf.dataset.ytbPrimetimeScanned = "true";
 
       console.log("[YTBlocker] Primetime shelf hidden");
-      shelf.style.opacity = "0";
-      shelf.style.pointerEvents = "none";
+      blockPrimetimeShelf(shelf);
     }
   }
 
@@ -571,7 +891,9 @@
     return (
       settings.keywordDismissalEnabled ||
       settings.channelBlockingEnabled ||
-      settings.playlistDismissalEnabled
+      settings.playlistDismissalEnabled ||
+      hasDurationFilterEnabled() ||
+      hasAgeFilterEnabled()
     );
   }
 
@@ -1146,6 +1468,8 @@
 
   function runAllScans() {
     removeMatchingElements();
+    scanForDurationMatches();
+    scanForAgeMatches();
     scanForKeywordMatches();
     scanForChannelMatches();
     scanForPlaylistMatches();
@@ -1187,6 +1511,8 @@
         delete el.dataset.ytbScanned;
         delete el.dataset.ytbChannelScanned;
         delete el.dataset.ytbPlaylistScanned;
+        delete el.dataset.ytbDurationScanned;
+        delete el.dataset.ytbAgeScanned;
       });
       document.querySelectorAll(PRIMETIME_SHELF_SELECTOR).forEach((el) => {
         delete el.dataset.ytbPrimetimeScanned;

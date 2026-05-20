@@ -3,6 +3,8 @@
 ## SHIPPED
 - YouTube Shorts & Playables blocking [PR #2] — docs/plans/2026-04-02-feat-youtube-shorts-playables-blocker-plan.md
 - Free Primetime Movies blocking [PR #3]
+- Video duration range blocking
+- Video creation date range blocking
 
 ## IN PR
 - Fix keyword dismissal auto-navigation on search pages [PR #7]

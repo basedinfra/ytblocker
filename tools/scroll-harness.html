@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>YTBlocker Scroll Harness</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f7f7f7;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 12px 24px;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+    }
+
+    ytd-rich-item-renderer {
+      display: block;
+      margin: 24px auto;
+      max-width: 760px;
+      min-height: 180px;
+      padding: 18px;
+      background: #fff;
+      border: 1px solid #ddd;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+
+    #video-title {
+      display: block;
+      margin-bottom: 12px;
+      color: #111;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    #metadata-line {
+      color: #666;
+      font-size: 13px;
+    }
+
+    ytd-thumbnail-overlay-time-status-renderer {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 3px 6px;
+      color: #fff;
+      background: #111;
+      border-radius: 3px;
+    }
+
+    button[aria-label="More actions"] {
+      float: right;
+      width: 36px;
+      height: 36px;
+    }
+
+    ytd-menu-service-item-renderer {
+      display: block;
+      position: fixed;
+      top: 80px;
+      left: 80px;
+      z-index: 20;
+      padding: 12px 18px;
+      background: #fff;
+      border: 1px solid #bbb;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>YTBlocker Scroll Harness</strong>
+    <span id="status">ready</span>
+  </header>
+  <main id="contents"></main>
+
+  <script>
+    const nativeScrollTo = window.scrollTo.bind(window);
+    const nativeScrollBy = window.scrollBy.bind(window);
+    const nativeScrollIntoView = Element.prototype.scrollIntoView;
+    const logs = [];
+    const originalLog = console.log.bind(console);
+
+    console.log = (...args) => {
+      logs.push(args.map((arg) => String(arg)).join(" "));
+      originalLog(...args);
+    };
+
+    function appendVideo(index, title, duration, ageText) {
+      const card = document.createElement("ytd-rich-item-renderer");
+      card.innerHTML = `
+        <button type="button" aria-label="More actions">...</button>
+        <a id="video-title" title="${title}">${title}</a>
+        <div id="metadata-line"><span>${ageText}</span><span>1K views</span></div>
+        <ytd-thumbnail-overlay-time-status-renderer>
+          <span id="text">${duration}</span>
+        </ytd-thumbnail-overlay-time-status-renderer>
+      `;
+
+      const button = card.querySelector("button");
+      button.addEventListener("click", () => {
+        window.__harnessMenuClicks += 1;
+        // Simulate YouTube page-world behavior that a content-script prototype
+        // patch cannot intercept: jump to the real card location.
+        nativeScrollTo(0, card.offsetTop);
+
+        document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
+          el.remove();
+        });
+        const menu = document.createElement("ytd-menu-popup-renderer");
+        menu.setAttribute("role", "menu");
+        const item = document.createElement("ytd-menu-service-item-renderer");
+        item.setAttribute("role", "menuitem");
+        item.textContent = "Not interested";
+        item.addEventListener("click", () => {
+          window.__harnessNotInterestedClicks += 1;
+          nativeScrollTo(0, card.offsetTop);
+          menu.remove();
+        });
+        menu.appendChild(item);
+        document.body.appendChild(menu);
+      });
+
+      document.getElementById("contents").appendChild(card);
+    }
+
+    function resetFeed() {
+      document.getElementById("contents").textContent = "";
+      document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
+        el.remove();
+      });
+      window.__harnessMenuClicks = 0;
+      window.__harnessNotInterestedClicks = 0;
+
+      for (let i = 1; i <= 34; i += 1) {
+        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
+      }
+      appendVideo(35, "BLOCKME offscreen keyword target", "2:30:00", "5 years ago");
+      for (let i = 36; i <= 48; i += 1) {
+        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
+      }
+
+      nativeScrollTo(0, 360);
+    }
+
+    window.__ytbHarness = {
+      logs,
+      nativeScrollTo,
+      nativeScrollBy,
+      nativeScrollIntoView,
+      resetFeed,
+      setChromeSettings(settings) {
+        window.chrome = {
+          storage: {
+            sync: {
+              get(defaults, callback) {
+                callback({ ...defaults, ...settings });
+              },
+              set() {},
+            },
+            onChanged: {
+              addListener() {},
+            },
+          },
+        };
+      },
+      snapshot() {
+        return {
+          scrollY: window.scrollY,
+          menuClicks: window.__harnessMenuClicks,
+          notInterestedClicks: window.__harnessNotInterestedClicks,
+          cardCount: document.querySelectorAll("ytd-rich-item-renderer").length,
+          logs,
+        };
+      },
+    };
+
+    resetFeed();
+  </script>
+</body>
+</html>

@@ -7,64 +7,111 @@
 <body>
   <h1>YTBlocker</h1>
 
-  <section class="toggles">
-    <label class="toggle-row">
-      <input type="checkbox" id="shortsToggle">
-      <span>Block Shorts</span>
-    </label>
-    <label class="toggle-row">
-      <input type="checkbox" id="playablesToggle">
-      <span>Block Playables</span>
-    </label>
-    <label class="toggle-row">
-      <input type="checkbox" id="primetimeToggle">
-      <span>Block Free Primetime Movies</span>
-    </label>
-    <label class="toggle-row">
-      <input type="checkbox" id="playlistDismissalToggle">
-      <span>Block playlists</span>
-    </label>
-  </section>
+  <nav class="tabs" role="tablist" aria-label="Settings sections">
+    <button class="tab active" id="mainTab" type="button" role="tab" aria-selected="true" aria-controls="mainPanel" data-tab="mainPanel">Main</button>
+    <button class="tab" id="timeTab" type="button" role="tab" aria-selected="false" aria-controls="timePanel" data-tab="timePanel">Time</button>
+    <button class="tab" id="videoTab" type="button" role="tab" aria-selected="false" aria-controls="videoPanel" data-tab="videoPanel">Video</button>
+  </nav>
 
-  <section class="timing-section">
-    <h2>Queue Timing</h2>
-    <div class="timing-row">
-      <label>
-        <span>Min</span>
-        <input type="number" id="delayMinInput" min="1" max="120" step="1">
+  <section class="tab-panel active" id="mainPanel" role="tabpanel" aria-labelledby="mainTab">
+    <section class="toggles">
+      <label class="toggle-row">
+        <input type="checkbox" id="shortsToggle">
+        <span>Block Shorts</span>
       </label>
-      <label>
-        <span>Max</span>
-        <input type="number" id="delayMaxInput" min="1" max="120" step="1">
+      <label class="toggle-row">
+        <input type="checkbox" id="playablesToggle">
+        <span>Block Playables</span>
       </label>
-      <span class="timing-unit">seconds</span>
-    </div>
+      <label class="toggle-row">
+        <input type="checkbox" id="primetimeToggle">
+        <span>Block Free Primetime Movies</span>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="playlistDismissalToggle">
+        <span>Block playlists</span>
+      </label>
+    </section>
   </section>
 
-  <section class="keywords-section">
-    <h2>Keywords</h2>
-    <div class="keyword-input-row">
-      <input type="text" id="keywordInput" placeholder="Add keyword...">
-      <button id="addKeyword">+</button>
-    </div>
-    <ul id="keywordList"></ul>
-    <label class="toggle-row">
-      <input type="checkbox" id="keywordDismissalToggle">
-      <span>Enable keyword dismissal</span>
-    </label>
+  <section class="tab-panel" id="timePanel" role="tabpanel" aria-labelledby="timeTab" hidden>
+    <section class="timing-section">
+      <div class="section-heading-row">
+        <h2>Randomized Deletes Range</h2>
+        <button class="info-button" id="deleteRangeInfoToggle" type="button" aria-expanded="false" aria-controls="deleteRangeInfo">i</button>
+      </div>
+      <div class="info-popover" id="deleteRangeInfo" role="status" hidden>
+        This randomized delay is used to mimic human behavior between automated delete actions.
+      </div>
+      <div class="timing-row">
+        <label>
+          <span>Min</span>
+          <input type="number" id="delayMinInput" min="1" max="120" step="1">
+        </label>
+        <label>
+          <span>Max</span>
+          <input type="number" id="delayMaxInput" min="1" max="120" step="1">
+        </label>
+        <span class="timing-unit">seconds</span>
+      </div>
+    </section>
+
+    <section class="duration-section">
+      <h2>Video Duration</h2>
+      <div class="duration-row">
+        <label>
+          <span>Min</span>
+          <input type="text" id="durationMinInput" placeholder="any" title="Use any, seconds, M:SS, or H:MM:SS">
+        </label>
+        <label>
+          <span>Max</span>
+          <input type="text" id="durationMaxInput" placeholder="any" title="Use any, seconds, M:SS, or H:MM:SS">
+        </label>
+      </div>
+    </section>
+
+    <section class="creation-section">
+      <h2>Creation Date</h2>
+      <div class="creation-row">
+        <label>
+          <span>Min age</span>
+          <input type="text" id="ageMinInput" placeholder="any" title="Use any, days, 12h, 2w, 3mo, or 1y">
+        </label>
+        <label>
+          <span>Max age</span>
+          <input type="text" id="ageMaxInput" placeholder="any" title="Use any, days, 12h, 2w, 3mo, or 1y">
+        </label>
+        <span class="timing-unit">days</span>
+      </div>
+    </section>
   </section>
 
-  <section class="channels-section">
-    <h2>Channels</h2>
-    <div class="keyword-input-row">
-      <input type="text" id="channelInput" placeholder="Add channel...">
-      <button id="addChannel">+</button>
-    </div>
-    <ul id="channelList"></ul>
-    <label class="toggle-row">
-      <input type="checkbox" id="channelBlockingToggle">
-      <span>Block matching channels</span>
-    </label>
+  <section class="tab-panel" id="videoPanel" role="tabpanel" aria-labelledby="videoTab" hidden>
+    <section class="keywords-section">
+      <h2>Keywords</h2>
+      <div class="keyword-input-row">
+        <input type="text" id="keywordInput" placeholder="Add keyword...">
+        <button id="addKeyword">+</button>
+      </div>
+      <ul id="keywordList"></ul>
+      <label class="toggle-row">
+        <input type="checkbox" id="keywordDismissalToggle">
+        <span>Enable keyword dismissal</span>
+      </label>
+    </section>
+
+    <section class="channels-section">
+      <h2>Channels</h2>
+      <div class="keyword-input-row">
+        <input type="text" id="channelInput" placeholder="Add channel...">
+        <button id="addChannel">+</button>
+      </div>
+      <ul id="channelList"></ul>
+      <label class="toggle-row">
+        <input type="checkbox" id="channelBlockingToggle">
+        <span>Block matching channels</span>
+      </label>
+    </section>
   </section>
 
   <script src="popup.js"></script>
