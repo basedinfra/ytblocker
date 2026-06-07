@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow — all features</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c2330; --border: #2a3340;
+    --text: #e6edf3; --muted: #9aa7b4; --done: #2ea043; --review: #58a6ff; --idle: #6e7681;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 26px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    padding: 20px; box-shadow: var(--shadow); display: flex; gap: 18px; align-items: center;
+    transition: transform .12s, border-color .12s; }
+  .card:hover { transform: translateY(-2px); border-color: var(--review); }
+  .ct { flex: 1 1 auto; min-width: 0; }
+  .ct h2 { font-size: 17px; margin: 0 0 4px; }
+  .ct .feat { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  .ct .meta { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .ct .meta b { color: var(--text); }
+  .bar { height: 7px; border-radius: 999px; background: #0c1118; overflow: hidden; margin-top: 10px; }
+  .bar > span { display: block; height: 100%; background: var(--review); }
+  .bar.full > span { background: var(--done); }
+  svg.ring { flex: 0 0 auto; }
+  .empty { color: var(--muted); padding: 50px; text-align: center; }
+  footer { color: var(--idle); font-size: 12px; margin-top: 36px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Flow</h1>
+  <div class="sub">Live progress across every tracked feature. Each board is the source of truth for its plan(s).</div>
+  <div class="grid" id="grid"></div>
+  <footer id="foot"></footer>
+</div>
+<script type="application/json" id="flow-index">[
+  {
+    "feature": "safe-dismissal-clicks",
+    "title": "Safe Dismissal Click Gate",
+    "file": "safe-dismissal-clicks.html",
+    "percent": 15,
+    "updatedAt": 1780870354,
+    "total": 4,
+    "done": 0,
+    "skipped": 0
+  }
+]</script>
+<script>
+(function () {
+  "use strict";
+  var items;
+  try { items = JSON.parse(document.getElementById("flow-index").textContent); }
+  catch (e) { items = []; }
+  var grid = document.getElementById("grid");
+  if (!items.length) { grid.innerHTML = "<div class='empty'>No flow boards yet. Run /c:plan to create one.</div>"; }
+  items.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+  items.forEach(function (it) {
+    var p = Math.max(0, Math.min(100, Math.round(it.percent || 0)));
+    var a = document.createElement("a");
+    a.href = it.file;
+    a.className = "card";
+    a.innerHTML =
+      ring(p) +
+      "<div class='ct'>" +
+        "<div class='feat'>" + esc(it.feature) + "</div>" +
+        "<h2>" + esc(it.title || it.feature) + "</h2>" +
+        "<div class='meta'><b>" + (it.done || 0) + "</b>/" + (it.total || 0) + " phases" +
+          (it.skipped ? " · " + it.skipped + " skipped" : "") +
+          (it.updatedAt ? " · updated " + fmt(it.updatedAt) : "") + "</div>" +
+        "<div class='bar" + (p >= 100 ? " full" : "") + "'><span style='width:" + p + "%'></span></div>" +
+      "</div>";
+    grid.appendChild(a);
+  });
+  document.getElementById("foot").textContent = items.length + " feature" + (items.length === 1 ? "" : "s") + " tracked";
+
+  function ring(p) {
+    var r = 26, c = 2 * Math.PI * r, on = c * p / 100;
+    var col = p >= 100 ? "var(--done)" : (p > 0 ? "var(--review)" : "var(--idle)");
+    return "<svg class='ring' width='64' height='64' viewBox='0 0 64 64'>" +
+      "<circle cx='32' cy='32' r='" + r + "' fill='none' stroke='#0c1118' stroke-width='7'/>" +
+      "<circle cx='32' cy='32' r='" + r + "' fill='none' stroke='" + col + "' stroke-width='7' stroke-linecap='round'" +
+        " transform='rotate(-90 32 32)' stroke-dasharray='" + on + " " + c + "'/>" +
+      "<text x='32' y='37' text-anchor='middle' font-size='15' font-weight='700' fill='#e6edf3'>" + p + "</text>" +
+      "</svg>";
+  }
+  function fmt(u) { var d = new Date(u * 1000); return isNaN(d) ? "" : d.toISOString().slice(0, 10); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+})();
+</script>
+</body>
+</html>

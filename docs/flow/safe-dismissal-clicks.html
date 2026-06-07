@@ -1,47 +1,572 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>safe-dismissal-clicks — flow</title>
-  <style>
-    body { font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; max-width: 960px; color: #111; }
-    h1 { font-size: 18px; margin: 0 0 16px; }
-    .mermaid { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
-    .legend { display: flex; gap: 12px; margin: 12px 0; font-size: 12px; }
-    .legend span { padding: 2px 8px; border-radius: 4px; }
-    .l-pending { background: #e5e7eb; color: #111827; }
-    .l-inProgress { background: #dbeafe; color: #1e3a8a; }
-    .l-inReview { background: #fef3c7; color: #78350f; }
-    .l-done { background: #d1fae5; color: #065f46; }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-  <script>
-    mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "loose" });
-  </script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2a3340;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --done: #2ea043;
+    --progress: #d29922;
+    --review: #58a6ff;
+    --blocked: #f85149;
+    --idle: #6e7681;
+    --edge: #3a4654;
+    --edge-hot: #58a6ff;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.45;
+  }
+  a { color: var(--review); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  header.flow-head {
+    display: flex; gap: 28px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px 26px; box-shadow: var(--shadow);
+  }
+  .head-text { flex: 1 1 auto; min-width: 0; }
+  .head-text .crumb { color: var(--muted); font-size: 12.5px; letter-spacing: .02em; text-transform: uppercase; }
+  .head-text h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  .head-text .desc { color: var(--muted); font-size: 14px; max-width: 760px; }
+  .head-meta { color: var(--muted); font-size: 12.5px; margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .head-meta b { color: var(--text); font-weight: 600; }
+
+  .ring-box { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .ring-label { font-size: 12px; color: var(--muted); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 2px 8px; font-size: 13px; color: var(--muted); }
+  .legend .item { display: inline-flex; gap: 7px; align-items: center; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.done { background: var(--done); }
+  .dot.in-progress { background: var(--progress); }
+  .dot.in-review { background: var(--review); }
+  .dot.blocked { background: var(--blocked); }
+  .dot.not-started { background: var(--idle); }
+  /* skipped: a resolved decision not to build — hollow dot, distinct from idle */
+  .dot.skipped { background: transparent; border: 2px solid var(--idle); width: 8px; height: 8px; }
+
+  .section-title { margin: 26px 2px 12px; font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+  #graphScroll { overflow: auto; border: 1px solid var(--border); border-radius: 16px; background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 0) 0 0 / 22px 22px,
+      var(--panel); padding: 22px; }
+  #graphInner { position: relative; display: inline-block; min-width: 100%; }
+  #edges { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: visible; }
+  #columns { display: flex; align-items: flex-start; gap: 84px; position: relative; z-index: 1; }
+  .level-col { display: flex; flex-direction: column; gap: 20px; min-width: 250px; }
+  .col-head { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; padding-left: 2px; }
+  .col-head .stage { font-weight: 600; color: var(--text); }
+  .par-tag { font-size: 11px; color: var(--review); border: 1px solid var(--review); border-radius: 999px; padding: 1px 8px; }
+
+  .card {
+    width: 250px; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 14px 12px; box-shadow: var(--shadow);
+    position: relative; border-left: 4px solid var(--idle);
+  }
+  .card.s-done { border-left-color: var(--done); }
+  .card.s-in-progress { border-left-color: var(--progress); }
+  .card.s-in-review { border-left-color: var(--review); }
+  .card.s-blocked { border-left-color: var(--blocked); }
+  .card.s-not-started { border-left-color: var(--idle); }
+  /* skipped card: dashed rail, de-emphasised, struck-through title */
+  .card.s-skipped { border-left-style: dashed; border-left-color: var(--idle); opacity: .6; }
+  .card.s-skipped .name { text-decoration: line-through; text-decoration-color: var(--muted); }
+
+  .card .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .card .name { font-weight: 650; font-size: 14.5px; }
+  .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
+  .pill.done { background: rgba(46,160,67,.16); color: #5ad07a; }
+  .pill.in-progress { background: rgba(210,153,34,.16); color: #e3b341; }
+  .pill.in-review { background: rgba(88,166,255,.16); color: #79b8ff; }
+  .pill.blocked { background: rgba(248,81,73,.16); color: #ff7b72; }
+  .pill.not-started { background: rgba(110,118,129,.16); color: #b1bac4; }
+  .pill.skipped { background: rgba(110,118,129,.12); color: #8b95a1; border: 1px dashed var(--idle); }
+
+  .bar { height: 8px; border-radius: 999px; background: #0c1118; margin: 11px 0 6px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 999px; background: var(--progress); transition: width .3s; }
+  .card.s-done .bar > span { background: var(--done); }
+  .card.s-in-review .bar > span { background: var(--review); }
+  .card.s-blocked .bar > span { background: var(--blocked); }
+  .pct-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .pct-row b { color: var(--text); }
+
+  .deps { font-size: 11.5px; color: var(--muted); margin-top: 9px; }
+  .deps .k { color: var(--text); font-weight: 600; }
+
+  .subs { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 9px; display: flex; flex-direction: column; gap: 7px; }
+  .sub { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+  .sub .sname { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .sbar { grid-column: 1 / -1; height: 5px; background: #0c1118; border-radius: 999px; overflow: hidden; }
+  .sub .sbar > span { display: block; height: 100%; }
+  .note { margin-top: 9px; font-size: 11.5px; color: var(--muted); font-style: italic; }
+  .pr { margin-top: 8px; font-size: 12px; }
+  .plan, .brainstorm { margin-top: 6px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .plan a, .brainstorm a { color: var(--review); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brainstorm a { color: #e3b341; }
+  table.flat td.doc-cell { font-size: 12px; max-width: 300px; }
+  table.flat td.doc-cell a { word-break: break-all; }
+  table.flat td.doc-cell .none { color: var(--idle); }
+  .doc-cell-inner { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+
+  /* copy-to-clipboard button (works offline under file:// via execCommand fallback) */
+  .copy-btn {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    padding: 1px 6px; font-size: 11px; line-height: 1.5; font-family: inherit;
+    background: var(--panel); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    vertical-align: middle; transition: color .15s, border-color .15s, background .15s;
+  }
+  .copy-btn:hover { color: var(--text); border-color: var(--edge-hot); }
+  .copy-btn:active { background: var(--panel-2); }
+  .copy-btn.copied { color: var(--done); border-color: var(--done); }
+
+  table.flat { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 13px; }
+  table.flat th, table.flat td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  table.flat th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  table.flat tr:hover td { background: var(--panel-2); }
+  .mini-bar { width: 120px; height: 7px; background: #0c1118; border-radius: 999px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+  .mini-bar > span { display: block; height: 100%; }
+  .indent { padding-left: 22px; color: var(--muted); }
+
+  footer { color: var(--idle); font-size: 12px; margin-top: 36px; text-align: center; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
 </head>
 <body>
-  <h1>safe-dismissal-clicks — flow</h1>
+<div class="wrap">
+  <header class="flow-head">
+    <div class="head-text">
+      <div class="crumb" id="crumb">FLOW</div>
+      <h1 id="title">Flow</h1>
+      <div class="desc" id="desc"></div>
+      <div class="head-meta" id="meta"></div>
+    </div>
+    <div class="ring-box">
+      <svg width="118" height="118" viewBox="0 0 118 118" id="ring">
+        <circle cx="59" cy="59" r="50" fill="none" stroke="#0c1118" stroke-width="12"/>
+        <circle cx="59" cy="59" r="50" fill="none" stroke="var(--done)" stroke-width="12"
+                stroke-linecap="round" id="ringfg"
+                transform="rotate(-90 59 59)" stroke-dasharray="0 999"/>
+        <text x="59" y="56" text-anchor="middle" font-size="26" font-weight="700" fill="#e6edf3" id="ringpct">0%</text>
+        <text x="59" y="76" text-anchor="middle" font-size="11" fill="#9aa7b4" id="ringsub">complete</text>
+      </svg>
+      <div class="ring-label">overall progress</div>
+    </div>
+  </header>
+
   <div class="legend">
-    <span class="l-pending">pending</span>
-    <span class="l-inProgress">in progress</span>
-    <span class="l-inReview">in review</span>
-    <span class="l-done">done</span>
+    <span class="item"><i class="dot done"></i> Done</span>
+    <span class="item"><i class="dot in-review"></i> In review</span>
+    <span class="item"><i class="dot in-progress"></i> In progress</span>
+    <span class="item"><i class="dot blocked"></i> Blocked</span>
+    <span class="item"><i class="dot not-started"></i> Not started</span>
+    <span class="item"><i class="dot skipped"></i> Skipped</span>
+    <span class="item">→ precursor must finish first &nbsp;·&nbsp; same column = independent / parallel</span>
   </div>
-  <div class="mermaid">
-graph TD
-    classDef pending fill:#e5e7eb,stroke:#6b7280,color:#111827
-    classDef inProgress fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
-    classDef inReview fill:#fef3c7,stroke:#d97706,color:#78350f
-    classDef done fill:#d1fae5,stroke:#059669,color:#064e3b
 
-    phase-1["P1: Characterize unsafe click surface"]:::inProgress
-    phase-2["P2: Add safe gate helpers"]:::pending
-    phase-3["P3: Integrate gate and fallbacks"]:::pending
-    phase-4["P4: Verify and clean up"]:::pending
-
-    phase-1 --> phase-2
-    phase-2 --> phase-3
-    phase-3 --> phase-4
+  <div class="section-title">Dependency flow</div>
+  <div id="graphScroll">
+    <div id="graphInner">
+      <svg id="edges"></svg>
+      <div id="columns"></div>
+    </div>
   </div>
+
+  <div class="section-title">All phases</div>
+  <div id="flat"></div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script type="application/json" id="flow-data">{
+  "schema": 1,
+  "feature": "safe-dismissal-clicks",
+  "title": "Safe Dismissal Click Gate",
+  "description": "Conservative safety gate around YouTube menu automation so extension-initiated dismissal clicks do not navigate into videos.",
+  "planPaths": [
+    "docs/plans/2026-06-06-fix-safe-dismissal-clicks-plan.md"
+  ],
+  "createdAt": 1780870354,
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Characterize unsafe click surface and harness cases",
+      "status": "in-progress",
+      "percent": 60,
+      "dependsOn": [],
+      "weight": 1,
+      "pr": null,
+      "planPath": "docs/plans/2026-06-06-fix-safe-dismissal-clicks-plan.md",
+      "brainstormPath": "docs/brainstorms/2026-06-06-safe-dismissal-clicks-brainstorm.md",
+      "note": "Phase 1 harness cases captured; validating before PR.",
+      "subPhases": []
+    },
+    {
+      "id": "phase-2",
+      "name": "Add safe gate helpers",
+      "status": "not-started",
+      "percent": 0,
+      "dependsOn": [
+        "phase-1"
+      ],
+      "weight": 1,
+      "pr": null,
+      "planPath": "docs/plans/2026-06-06-fix-safe-dismissal-clicks-plan.md",
+      "brainstormPath": "docs/brainstorms/2026-06-06-safe-dismissal-clicks-brainstorm.md",
+      "note": "",
+      "subPhases": []
+    },
+    {
+      "id": "phase-3",
+      "name": "Integrate gate and conservative fallbacks",
+      "status": "not-started",
+      "percent": 0,
+      "dependsOn": [
+        "phase-2"
+      ],
+      "weight": 1,
+      "pr": null,
+      "planPath": "docs/plans/2026-06-06-fix-safe-dismissal-clicks-plan.md",
+      "brainstormPath": "docs/brainstorms/2026-06-06-safe-dismissal-clicks-brainstorm.md",
+      "note": "",
+      "subPhases": []
+    },
+    {
+      "id": "phase-4",
+      "name": "Verification, manual QA notes, and cleanup",
+      "status": "not-started",
+      "percent": 0,
+      "dependsOn": [
+        "phase-3"
+      ],
+      "weight": 1,
+      "pr": null,
+      "planPath": "docs/plans/2026-06-06-fix-safe-dismissal-clicks-plan.md",
+      "brainstormPath": "docs/brainstorms/2026-06-06-safe-dismissal-clicks-brainstorm.md",
+      "note": "",
+      "subPhases": []
+    }
+  ],
+  "percent": 15,
+  "counts": {
+    "total": 4,
+    "done": 0,
+    "skipped": 0
+  },
+  "updatedAt": 1780870354,
+  "repo": "MrHetz/ytblocker"
+}</script>
+<script>
+(function () {
+  "use strict";
+  var STATUS_ORDER = ["not-started", "in-progress", "in-review", "blocked", "done", "skipped"];
+  var STATUS_LABEL = {
+    "not-started": "Not started", "in-progress": "In progress",
+    "in-review": "In review", "blocked": "Blocked", "done": "Done", "skipped": "Skipped"
+  };
+
+  var data;
+  try { data = JSON.parse(document.getElementById("flow-data").textContent); }
+  catch (e) { document.querySelector(".wrap").innerHTML = "<p class='empty'>Could not parse flow data.</p>"; return; }
+
+  var phases = Array.isArray(data.phases) ? data.phases : [];
+  document.title = (data.title || data.feature || "Flow") + " — Flow";
+
+  // ---------- header ----------
+  document.getElementById("crumb").textContent = (data.feature || "flow").toUpperCase();
+  document.getElementById("title").textContent = data.title || data.feature || "Flow";
+  document.getElementById("desc").textContent = data.description || "";
+
+  var overall = typeof data.percent === "number" ? data.percent : computeOverall(phases);
+  var doneCount = phases.filter(function (p) { return p.status === "done"; }).length;
+  var skippedCount = phases.filter(function (p) { return p.status === "skipped"; }).length;
+  setRing(overall);
+  document.getElementById("meta").innerHTML =
+    "<span><b>" + doneCount + "</b> / " + phases.length + " phases done" +
+      (skippedCount ? " · <b>" + skippedCount + "</b> skipped" : "") + "</span>" +
+    "<span><b>" + overall + "%</b> overall</span>" +
+    (data.updatedAt ? "<span>Updated <b>" + fmt(data.updatedAt) + "</b></span>" : "") +
+    planLinks(data.planPaths);
+
+  // ---------- layout into levels ----------
+  var byId = {};
+  phases.forEach(function (p) { byId[p.id] = p; });
+  var levelOf = computeLevels(phases, byId);
+  var maxLevel = 0;
+  phases.forEach(function (p) { maxLevel = Math.max(maxLevel, levelOf[p.id]); });
+
+  var columns = [];
+  for (var l = 0; l <= maxLevel; l++) columns.push([]);
+  phases.forEach(function (p) { columns[levelOf[p.id]].push(p); });
+
+  var colsEl = document.getElementById("columns");
+  var cardEls = {};
+  columns.forEach(function (col, idx) {
+    if (!col.length) return;
+    var c = document.createElement("div");
+    c.className = "level-col";
+    var head = document.createElement("div");
+    head.className = "col-head";
+    head.innerHTML = "<span class='stage'>Stage " + (idx + 1) + "</span>" +
+      (col.length > 1 ? "<span class='par-tag'>∥ " + col.length + " parallel</span>" : "");
+    c.appendChild(head);
+    col.forEach(function (p) {
+      var el = renderCard(p, byId);
+      cardEls[p.id] = el;
+      c.appendChild(el);
+    });
+    colsEl.appendChild(c);
+  });
+
+  if (!phases.length) {
+    document.getElementById("graphScroll").innerHTML = "<div class='empty'>No phases yet.</div>";
+  }
+  drawEdges(byId, cardEls);
+  window.addEventListener("resize", function () { drawEdges(byId, cardEls); });
+
+  // ---------- flat table ----------
+  renderFlat(phases);
+
+  // ---------- copy-to-clipboard buttons (cards + table) ----------
+  setupCopy();
+
+  document.getElementById("foot").textContent =
+    "Generated by the flow skill · source of truth is the embedded JSON · " +
+    (data.feature || "");
+
+  // ================= helpers =================
+  function pct(n) { n = Math.round(n || 0); return Math.max(0, Math.min(100, n)); }
+
+  function computeOverall(ps) {
+    if (!ps.length) return 0;
+    var tot = 0, w = 0;
+    ps.forEach(function (p) {
+      if (p.status === "skipped") return; // skipped phases are excluded from the average
+      var weight = p.weight || 1;
+      tot += pct(p.percent) * weight; w += weight;
+    });
+    return w ? Math.round(tot / w) : 0;
+  }
+
+  function computeLevels(ps, idMap) {
+    var memo = {}, stack = {};
+    function lvl(id) {
+      if (memo[id] != null) return memo[id];
+      if (stack[id]) return 0; // cycle guard
+      stack[id] = true;
+      var p = idMap[id];
+      var deps = (p && Array.isArray(p.dependsOn)) ? p.dependsOn.filter(function (d) { return idMap[d]; }) : [];
+      var v = deps.length ? 1 + Math.max.apply(null, deps.map(lvl)) : 0;
+      stack[id] = false; memo[id] = v; return v;
+    }
+    ps.forEach(function (p) { lvl(p.id); });
+    return memo;
+  }
+
+  function setRing(p) {
+    var r = 50, circ = 2 * Math.PI * r;
+    var fg = document.getElementById("ringfg");
+    fg.setAttribute("stroke-dasharray", (circ * p / 100) + " " + circ);
+    fg.setAttribute("stroke", p >= 100 ? "var(--done)" : (p > 0 ? "var(--review)" : "var(--idle)"));
+    document.getElementById("ringpct").textContent = p + "%";
+  }
+
+  function renderCard(p, idMap) {
+    var el = document.createElement("div");
+    el.className = "card s-" + (p.status || "not-started");
+    var html = "";
+    html += "<div class='top'><span class='name'>" + esc(p.name || p.id) + "</span>" +
+            "<span class='pill " + (p.status || "not-started") + "'>" + (STATUS_LABEL[p.status] || "Not started") + "</span></div>";
+    var pp = pct(p.percent);
+    html += "<div class='bar'><span style='width:" + pp + "%'></span></div>";
+    html += "<div class='pct-row'><span>progress</span><b>" + pp + "%</b></div>";
+
+    var deps = (p.dependsOn || []).filter(function (d) { return idMap[d]; });
+    var blocks = Object.keys(idMap).filter(function (k) {
+      return (idMap[k].dependsOn || []).indexOf(p.id) !== -1;
+    });
+    if (deps.length) html += "<div class='deps'><span class='k'>After:</span> " +
+      deps.map(function (d) { return esc(idMap[d].name || d); }).join(", ") + "</div>";
+    if (blocks.length) html += "<div class='deps'><span class='k'>Unblocks:</span> " +
+      blocks.map(function (d) { return esc(idMap[d].name || d); }).join(", ") + "</div>";
+    if (!deps.length && !blocks.length) html += "<div class='deps'><span class='k'>Independent</span></div>";
+
+    if (Array.isArray(p.subPhases) && p.subPhases.length) {
+      html += "<div class='subs'>";
+      p.subPhases.forEach(function (s) {
+        var sp = pct(s.percent), st = s.status || "not-started";
+        html += "<div class='sub'>" +
+          "<i class='dot " + st + "'></i>" +
+          "<span class='sname' title='" + esc(s.name || s.id) + "'>" + esc(s.name || s.id) + "</span>" +
+          "<span class='pct-row'><b>" + sp + "%</b></span>" +
+          "<div class='sbar'><span style='width:" + sp + "%;background:" + colorFor(st) + "'></span></div>" +
+          "</div>";
+      });
+      html += "</div>";
+    }
+    if (p.pr) html += "<div class='pr'>" + prLink(p.pr) + "</div>";
+    if (p.planPath) html += "<div class='plan' title='" + esc(p.planPath) + "'>📄 " + docLink(p.planPath, true) + copyBtn(p.planPath) + "</div>";
+    if (p.brainstormPath) html += "<div class='brainstorm' title='" + esc(p.brainstormPath) + "'>💡 " + docLink(p.brainstormPath, true) + copyBtn(p.brainstormPath) + "</div>";
+    if (p.note) html += "<div class='note'>" + esc(p.note) + "</div>";
+    el.innerHTML = html;
+    return el;
+  }
+
+  function drawEdges(idMap, els) {
+    var svg = document.getElementById("edges");
+    var inner = document.getElementById("graphInner");
+    if (!svg || !inner) return;
+    svg.innerHTML = "";
+    var ib = inner.getBoundingClientRect();
+    svg.setAttribute("width", inner.scrollWidth);
+    svg.setAttribute("height", inner.scrollHeight);
+    Object.keys(els).forEach(function (id) {
+      var p = idMap[id];
+      (p.dependsOn || []).forEach(function (depId) {
+        var from = els[depId], to = els[id];
+        if (!from || !to) return;
+        var fb = from.getBoundingClientRect(), tb = to.getBoundingClientRect();
+        var x1 = fb.right - ib.left, y1 = fb.top - ib.top + fb.height / 2;
+        var x2 = tb.left - ib.left, y2 = tb.top - ib.top + tb.height / 2;
+        var mx = (x1 + x2) / 2;
+        var done = idMap[depId].status === "done";
+        var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", done ? "var(--done)" : "var(--edge)");
+        path.setAttribute("stroke-width", done ? "2.4" : "1.8");
+        path.setAttribute("opacity", done ? "0.9" : "0.7");
+        svg.appendChild(path);
+        var ah = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        ah.setAttribute("d", "M" + x2 + "," + y2 + " l-7,-4 l0,8 z");
+        ah.setAttribute("fill", done ? "var(--done)" : "var(--edge)");
+        svg.appendChild(ah);
+      });
+    });
+  }
+
+  function renderFlat(ps) {
+    if (!ps.length) { document.getElementById("flat").innerHTML = "<div class='empty'>No phases.</div>"; return; }
+    var rows = "<table class='flat'><thead><tr><th>Phase</th><th>Status</th><th>Progress</th><th>After</th><th>PR</th><th>Plan</th><th>Brainstorm</th></tr></thead><tbody>";
+    ps.forEach(function (p) {
+      rows += row(p, false);
+      (p.subPhases || []).forEach(function (s) { rows += row(s, true); });
+    });
+    rows += "</tbody></table>";
+    document.getElementById("flat").innerHTML = rows;
+    function row(p, sub) {
+      var st = p.status || "not-started", pp = pct(p.percent);
+      var deps = sub ? "" : (p.dependsOn || []).join(", ");
+      return "<tr>" +
+        "<td class='" + (sub ? "indent" : "") + "'>" + (sub ? "↳ " : "") + esc(p.name || p.id) + "</td>" +
+        "<td><span class='pill " + st + "'>" + (STATUS_LABEL[st] || st) + "</span></td>" +
+        "<td><span class='mini-bar'><span style='width:" + pp + "%;background:" + colorFor(st) + "'></span></span>" + pp + "%</td>" +
+        "<td>" + esc(deps) + "</td>" +
+        "<td>" + (p.pr ? prLink(p.pr) : "") + "</td>" +
+        "<td class='doc-cell'>" + docCell(p.planPath) + "</td>" +
+        "<td class='doc-cell'>" + docCell(p.brainstormPath) + "</td>" +
+        "</tr>";
+    }
+  }
+
+  function colorFor(st) {
+    return st === "done" ? "var(--done)" : st === "in-review" ? "var(--review)" :
+      st === "blocked" ? "var(--blocked)" : st === "in-progress" ? "var(--progress)" : "var(--idle)";
+    // skipped falls through to --idle (rendered de-emphasised via card opacity)
+  }
+  function planLinks(paths) {
+    if (!paths || !paths.length) return "";
+    return "<span>Plans: <b>" + paths.length + "</b></span>";
+  }
+  function prLink(pr) {
+    var s = String(pr);
+    var num = s.replace(/[^0-9]/g, "");
+    if (/^https?:/.test(s)) return "<a href='" + esc(s) + "' target='_blank' rel='noopener'>PR</a>";
+    if (num && data.repo) {
+      var href = "https://github.com/" + data.repo + "/pull/" + num;
+      return "<a class='pr' href='" + esc(href) + "' target='_blank' rel='noopener'>#" + num + "</a>";
+    }
+    return num ? "<span class='pr'>#" + num + "</span>" : esc(s);
+  }
+  function docLink(pp, short) {
+    var s = String(pp == null ? "" : pp);
+    if (!s) return "";
+    var label = short ? s.split("/").pop() : s;
+    // boards live in docs/flow/; make a best-effort relative link to the doc file
+    var href = s.indexOf("docs/") === 0 ? "../" + s.slice("docs/".length) : s;
+    return "<a href='" + esc(href) + "' title='" + esc(s) + "'>" + esc(label) + "</a>";
+  }
+  // a copy-the-repo-relative-path button; wired by the delegated listener below
+  function copyBtn(pathStr) {
+    var s = String(pathStr == null ? "" : pathStr);
+    if (!s) return "";
+    return "<button type='button' class='copy-btn' data-copy='" + esc(s) +
+      "' title='Copy path: " + esc(s) + "'>📋</button>";
+  }
+  // flat-table cell: link + copy button, or an em-dash when empty
+  function docCell(pathStr) {
+    var s = String(pathStr == null ? "" : pathStr);
+    if (!s) return "<span class='none'>—</span>";
+    return "<span class='doc-cell-inner'>" + docLink(s) + copyBtn(s) + "</span>";
+  }
+  // one delegated handler for every copy button (cards + table)
+  function setupCopy() {
+    document.addEventListener("click", function (e) {
+      var t = e.target;
+      var btn = t && t.closest ? t.closest(".copy-btn") : null;
+      if (!btn) return;
+      e.preventDefault();
+      copyToClipboard(btn.getAttribute("data-copy") || "", btn);
+    });
+  }
+  function copyToClipboard(text, btn) {
+    function flash() {
+      if (!btn) return;
+      var prev = btn.textContent;
+      btn.textContent = "✓"; btn.classList.add("copied");
+      setTimeout(function () { btn.textContent = prev; btn.classList.remove("copied"); }, 1100);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(flash, function () { legacyCopy(text); flash(); });
+      return;
+    }
+    legacyCopy(text); flash();
+  }
+  // file:// is not always a secure context for navigator.clipboard — fall back
+  function legacyCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) { /* clipboard unavailable */ }
+    document.body.removeChild(ta);
+  }
+  function fmt(unixSeconds) {
+    var d = new Date(unixSeconds * 1000);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+})();
+</script>
 </body>
 </html>
