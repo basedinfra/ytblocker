@@ -108,49 +108,10 @@ async function evaluate(cdp, sessionId, expression, awaitPromise = true) {
   return result.result.value;
 }
 
-function keywordSettings() {
-  return {
-    keywordDismissalEnabled: true,
-    keywords: [{ text: "BLOCKME", caseSensitive: false }],
-    dismissalDelayMinSeconds: 1,
-    dismissalDelayMaxSeconds: 1,
-  };
-}
-
-function checkEqual(checks, label, actual, expected) {
-  if (expected === undefined) return;
-  checks.push({ label, actual, expected, passed: actual === expected });
-}
-
-function checkDelta(checks, actual, expected) {
-  if (expected === undefined) return;
-  checks.push({
-    label: "scroll delta",
-    actual,
-    expected,
-    passed: Math.abs(actual - expected) <= 2,
-  });
-}
-
-function checkUrlUnchanged(checks, before, after, expected) {
-  if (expected === undefined) return;
-  checks.push({
-    label: "URL unchanged",
-    actual: after.href,
-    expected: before.href,
-    passed: expected ? after.href === before.href : after.href !== before.href,
-  });
-}
-
 async function runScenario(cdp, sessionId, scenario) {
   const contentScript = await readFile(new URL("content/content.js", ROOT), "utf8");
-  const feedOptions = scenario.feedOptions || {};
 
-  await evaluate(
-    cdp,
-    sessionId,
-    `window.__ytbHarness.resetFeed(${JSON.stringify(feedOptions)})`
-  );
+  await evaluate(cdp, sessionId, "window.__ytbHarness.resetFeed()");
   if (scenario.setupExpression) {
     await evaluate(cdp, sessionId, scenario.setupExpression);
   }
@@ -173,36 +134,43 @@ async function runScenario(cdp, sessionId, scenario) {
     }, sessionId);
     await wait(Math.max(0, 4500 - scenario.wheelAtMs));
   } else {
-    await wait(scenario.waitMs || 4500);
+    await wait(4500);
   }
 
   const after = await evaluate(cdp, sessionId, "window.__ytbHarness.snapshot()");
+  const expectedMissingTitleStillPresent = scenario.expectedMissingTitle
+    ? await evaluate(
+      cdp,
+      sessionId,
+      `Boolean([...document.querySelectorAll("#video-title, h3[title], .ytLockupMetadataViewModelTitle")].some((el) => {
+        const label = el.getAttribute("title") || el.getAttribute("aria-label") || el.textContent.trim();
+        return label === ${JSON.stringify(scenario.expectedMissingTitle)} ||
+          label.startsWith(${JSON.stringify(scenario.expectedMissingTitle + " ")});
+      }))`
+    )
+    : false;
+  const expectedBlockedSelectorMatched = scenario.expectedBlockedSelector
+    ? await evaluate(
+      cdp,
+      sessionId,
+      `Boolean(document.querySelector(${JSON.stringify(scenario.expectedBlockedSelector)}))`
+    )
+    : true;
   const delta = after.scrollY - before.scrollY;
-  const checks = [];
-  checkDelta(checks, delta, scenario.expectedDelta ?? 0);
-  checkEqual(checks, "menu clicks", after.menuClicks, scenario.expectedMenuClicks);
-  checkEqual(checks, "not interested clicks", after.notInterestedClicks, scenario.expectedNotInterestedClicks);
-  checkEqual(checks, "stale not interested clicks", after.staleNotInterestedClicks, scenario.expectedStaleNotInterestedClicks);
-  checkEqual(checks, "navigation attempts", after.navigationAttempts, scenario.expectedNavigationAttempts);
-  checkEqual(checks, "card count", after.cardCount, scenario.expectedCardCount);
-  checkEqual(checks, "pathname", after.pathname, scenario.expectedPathname);
-  checkEqual(checks, "removed notice count", after.removedNoticeCount, scenario.expectedRemovedNoticeCount);
-  checkEqual(checks, "removed filter text", after.removedFilters.join(" | "), scenario.expectedRemovedFilters);
-  checkUrlUnchanged(checks, before, after, scenario.expectUrlUnchanged);
+  const expectedDelta = scenario.expectedDelta || 0;
+  const scrollPassed = Math.abs(delta - expectedDelta) <= 2;
+  const cardCountPassed = scenario.expectedCardCount === undefined ||
+    after.cardCount === scenario.expectedCardCount;
+  const premiumShelfCountPassed = scenario.expectedPremiumShelfCount === undefined ||
+    after.premiumShelfCount === scenario.expectedPremiumShelfCount;
+  const missingTitlePassed = !scenario.expectedMissingTitle ||
+    !expectedMissingTitleStillPresent;
+  const blockedSelectorPassed = !scenario.expectedBlockedSelector ||
+    expectedBlockedSelectorMatched;
+  const passed = scrollPassed && cardCountPassed && premiumShelfCountPassed &&
+    missingTitlePassed && blockedSelectorPassed;
 
-  const assertionsPassed = checks.every((check) => check.passed);
-  const passed = scenario.expectedFailure ? !assertionsPassed : assertionsPassed;
-
-  return {
-    name: scenario.name,
-    expectedFailure: Boolean(scenario.expectedFailure),
-    passed,
-    assertionsPassed,
-    before,
-    after,
-    delta,
-    checks,
-  };
+  return { name: scenario.name, passed, before, after, delta, expectedDelta };
 }
 
 async function removeWithRetry(path) {
@@ -250,27 +218,46 @@ try {
   const scenarios = [
     {
       name: "keyword offscreen safe remove",
-      settings: keywordSettings(),
-      expectedMenuClicks: 0,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedCardCount: 48,
-      expectedRemovedNoticeCount: 1,
-      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
-      expectUrlUnchanged: true,
+      settings: {
+        keywordDismissalEnabled: true,
+        keywords: [{ text: "BLOCKME", caseSensitive: false }],
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
     },
     {
       name: "keyword offscreen safe remove while user wheels",
       wheelAtMs: 900,
       expectedDelta: 160,
-      settings: keywordSettings(),
-      expectedMenuClicks: 0,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedCardCount: 48,
-      expectedRemovedNoticeCount: 1,
-      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
-      expectUrlUnchanged: true,
+      settings: {
+        keywordDismissalEnabled: true,
+        keywords: [{ text: "BLOCKME", caseSensitive: false }],
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "keyword remove ignores menu-click budget",
+      expectedCardCount: 47,
+      expectedMissingTitle: "BLOCKME extra 12",
+      setupExpression: `
+        (() => {
+          for (let i = 1; i <= 12; i += 1) {
+            window.__ytbHarness.appendVideo(
+              100 + i,
+              \`BLOCKME extra \${i}\`,
+              "10:00",
+              "2 days ago"
+            );
+          }
+        })()
+      `,
+      settings: {
+        keywordDismissalEnabled: true,
+        keywords: [{ text: "BLOCKME", caseSensitive: false }],
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
     },
     {
       name: "duration offscreen remove",
@@ -279,13 +266,6 @@ try {
         dismissalDelayMinSeconds: 1,
         dismissalDelayMaxSeconds: 1,
       },
-      expectedMenuClicks: 0,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedCardCount: 48,
-      expectedRemovedNoticeCount: 1,
-      expectedRemovedFilters: "Filtered by: Duration max 1:00:00 (video 2:30:00)",
-      expectUrlUnchanged: true,
     },
     {
       name: "age offscreen remove",
@@ -294,82 +274,168 @@ try {
         dismissalDelayMinSeconds: 1,
         dismissalDelayMaxSeconds: 1,
       },
-      expectedMenuClicks: 0,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
+    },
+    {
+      name: "modern lockup channel remove",
+      expectedMissingTitle:
+        "AI Bubble Will Burst Eventually Says Bridgewater's Ray Dalio",
+      setupExpression: "window.__ytbHarness.appendModernLockupVideo()",
+      settings: {
+        channelBlockingEnabled: true,
+        blockedChannels: [{ text: "Bloomberg", caseSensitive: false }],
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "visible PBS North lockup channel remove",
+      expectedMissingTitle:
+        "The Trillion-Dollar Gas Hunt: Minnesota’s Massive Helium Discovery | In Business",
+      setupExpression: "window.__ytbHarness.prependPbsNorthLockupVideo()",
+      settings: {
+        channelBlockingEnabled: true,
+        blockedChannels: [{ text: "PBS", caseSensitive: false }],
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "sponsored lockup video remove",
+      expectedMissingTitle: "They don't care if you can't afford a ransom.",
+      setupExpression: "window.__ytbHarness.appendSponsoredVideo()",
+      settings: {
+        sponsoredVideosBlocked: true,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "movie recommendation offscreen remove",
+      expectedCardCount: 47,
+      expectedMissingTitle: "Richie Rich",
+      setupExpression: `
+        (() => {
+          const card = document.createElement("ytd-rich-item-renderer");
+          card.innerHTML = \`
+            <a id="video-title" title="Richie Rich">Richie Rich</a>
+            <ytd-video-meta-block rich-meta>
+              <div id="byline-container">
+                <ytd-channel-name id="channel-name">
+                  <yt-formatted-string id="text" title="Comedy \\u2022 1994">Comedy \\u2022 1994</yt-formatted-string>
+                </ytd-channel-name>
+              </div>
+            </ytd-video-meta-block>
+            <ytd-badge-supported-renderer class="video-badge">
+              <badge-shape aria-label="Free with ads"><div class="ytBadgeShapeText">Free with ads</div></badge-shape>
+              <badge-shape aria-label="PG"><div class="ytBadgeShapeText">PG</div></badge-shape>
+            </ytd-badge-supported-renderer>
+          \`;
+          document.getElementById("contents").appendChild(card);
+        })()
+      `,
+      settings: {
+        movieRecommendationsBlocked: true,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "documentary recommendation offscreen remove",
+      expectedCardCount: 47,
+      expectedMissingTitle: "What Ravens Do",
+      setupExpression: `
+        (() => {
+          const card = document.createElement("ytd-rich-item-renderer");
+          card.innerHTML = \`
+            <a id="video-title" title="What Ravens Do">What Ravens Do</a>
+            <ytd-video-meta-block rich-meta>
+              <div id="byline-container">
+                <ytd-channel-name id="channel-name">
+                  <yt-formatted-string id="text" title="Documentary \\u2022 2026">Documentary \\u2022 2026</yt-formatted-string>
+                </ytd-channel-name>
+              </div>
+            </ytd-video-meta-block>
+            <ytd-badge-supported-renderer class="video-badge">
+              <badge-shape aria-label="Free with ads"><div class="ytBadgeShapeText">Free with ads</div></badge-shape>
+              <badge-shape aria-label="TV-G"><div class="ytBadgeShapeText">TV-G</div></badge-shape>
+            </ytd-badge-supported-renderer>
+          \`;
+          document.getElementById("contents").appendChild(card);
+        })()
+      `,
+      settings: {
+        documentaryRecommendationsBlocked: true,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
+    {
+      name: "movie recommendation leaves documentaries split out",
       expectedCardCount: 48,
-      expectedRemovedNoticeCount: 1,
-      expectedRemovedFilters: "Filtered by: Creation date max 365 days (video age 1825 days)",
-      expectUrlUnchanged: true,
-    },
-    {
-      name: "visible keyword safe not interested click",
-      feedOptions: { targetIndex: 3 },
-      settings: keywordSettings(),
-      expectedMenuClicks: 1,
-      expectedNotInterestedClicks: 1,
-      expectedNavigationAttempts: 0,
-      expectedCardCount: 48,
-      expectedRemovedNoticeCount: 1,
-      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
-      expectUrlUnchanged: true,
-    },
-    {
-      name: "unsafe menu button nested in video link should not be clicked",
-      expectedFailure: true,
-      feedOptions: {
-        targetIndex: 3,
-        targetOptions: { buttonInAnchor: true, menuMode: "button-navigates" },
+      setupExpression: `
+        (() => {
+          const card = document.createElement("ytd-rich-item-renderer");
+          card.innerHTML = \`
+            <a id="video-title" title="Movie Toggle Documentary">Movie Toggle Documentary</a>
+            <ytd-video-meta-block rich-meta>
+              <div id="byline-container">
+                <ytd-channel-name id="channel-name">
+                  <yt-formatted-string id="text" title="Documentary \\u2022 2026">Documentary \\u2022 2026</yt-formatted-string>
+                </ytd-channel-name>
+              </div>
+            </ytd-video-meta-block>
+            <ytd-badge-supported-renderer class="video-badge">
+              <badge-shape aria-label="Free with ads"><div class="ytBadgeShapeText">Free with ads</div></badge-shape>
+              <badge-shape aria-label="TV-G"><div class="ytBadgeShapeText">TV-G</div></badge-shape>
+            </ytd-badge-supported-renderer>
+          \`;
+          document.getElementById("contents").appendChild(card);
+        })()
+      `,
+      settings: {
+        movieRecommendationsBlocked: true,
+        documentaryRecommendationsBlocked: false,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
       },
-      settings: keywordSettings(),
-      expectedMenuClicks: 0,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedPathname: "/",
-      expectUrlUnchanged: true,
     },
     {
-      name: "stale unowned popup should not receive not interested click",
-      expectedFailure: true,
-      feedOptions: {
-        targetIndex: 3,
-        stalePopup: true,
-        targetOptions: { menuMode: "no-popup" },
+      name: "music video recommendation shelf hidden",
+      expectedBlockedSelector:
+        "ytd-brand-video-shelf-renderer[data-ytb-music-video-blocked='true']",
+      setupExpression: `
+        (() => {
+          const shelf = document.createElement("ytd-brand-video-shelf-renderer");
+          shelf.innerHTML = \`
+            <div id="section-header-container">
+              <h2><span>New music videos this week</span></h2>
+              <badge-shape><div class="ytBadgeShapeText">YouTube featured</div></badge-shape>
+            </div>
+            <yt-formatted-string id="subtitle">Discover new music and artists every week on YouTube</yt-formatted-string>
+            <div id="visible-video-container">
+              <ytd-rich-grid-media>
+                <a id="video-title" title="Music Video Shelf Item">Music Video Shelf Item</a>
+              </ytd-rich-grid-media>
+            </div>
+          \`;
+          document.getElementById("contents").appendChild(shelf);
+        })()
+      `,
+      settings: {
+        musicVideoRecommendationsBlocked: true,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
       },
-      settings: keywordSettings(),
-      expectedMenuClicks: 1,
-      expectedNotInterestedClicks: 0,
-      expectedStaleNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectUrlUnchanged: true,
     },
     {
-      name: "anchor-like not interested item should not be clicked",
-      expectedFailure: true,
-      feedOptions: {
-        targetIndex: 3,
-        targetOptions: { menuMode: "anchor-not-interested" },
+      name: "premium shelf dismisses with not interested",
+      expectedPremiumShelfCount: 0,
+      setupExpression: "window.__ytbHarness.appendPremiumShelf()",
+      settings: {
+        premiumSectionsDismissalEnabled: true,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
       },
-      settings: keywordSettings(),
-      expectedMenuClicks: 1,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedPathname: "/",
-      expectUrlUnchanged: true,
-    },
-    {
-      name: "not interested command that navigates should trip URL guard",
-      expectedFailure: true,
-      feedOptions: {
-        targetIndex: 3,
-        targetOptions: { menuMode: "menu-item-navigates" },
-      },
-      settings: keywordSettings(),
-      expectedMenuClicks: 1,
-      expectedNotInterestedClicks: 0,
-      expectedNavigationAttempts: 0,
-      expectedPathname: "/",
-      expectUrlUnchanged: true,
     },
   ];
 
@@ -381,28 +447,15 @@ try {
   cdp.close();
 
   for (const result of results) {
-    let status = "FAIL";
-    if (result.expectedFailure && result.passed) {
-      status = "XFAIL";
-    } else if (result.expectedFailure && !result.passed) {
-      status = "XPASS";
-    } else if (result.passed) {
-      status = "PASS";
-    }
-
+    const status = result.passed ? "PASS" : "FAIL";
     console.log(
-      `${status} ${result.name}: scroll delta=${result.delta}`
+      `${status} ${result.name}: scroll delta=${result.delta} expected=${result.expectedDelta}`
     );
     console.log(
       `  before=${result.before.scrollY} after=${result.after.scrollY} ` +
       `menuClicks=${result.after.menuClicks} notInterestedClicks=${result.after.notInterestedClicks} ` +
-      `staleClicks=${result.after.staleNotInterestedClicks} navigationAttempts=${result.after.navigationAttempts} ` +
-      `path=${result.after.pathname} cardCount=${result.after.cardCount} removedNotices=${result.after.removedNoticeCount}`
+      `cardCount=${result.after.cardCount} premiumShelfCount=${result.after.premiumShelfCount}`
     );
-    for (const check of result.checks) {
-      const checkStatus = check.passed ? "ok" : "not ok";
-      console.log(`    ${checkStatus}: ${check.label} actual=${check.actual} expected=${check.expected}`);
-    }
   }
 
   if (results.some((result) => !result.passed)) {

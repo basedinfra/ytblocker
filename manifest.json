@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YTBlocker",
   "version": "1.0.0",
-  "description": "Block YouTube Shorts, Playables, channels, playlists, and videos by keyword, duration, or age",
+  "description": "Block YouTube Shorts, Playables, sponsored videos, Premium promos, movie, documentary, and music video recommendations, channels, playlists, and videos by keyword, duration, or age",
   "permissions": ["storage"],
   "host_permissions": ["*://*.youtube.com/*"],
   "content_scripts": [

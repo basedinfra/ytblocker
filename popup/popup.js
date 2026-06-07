@@ -3,7 +3,20 @@
 
   const shortsToggle = document.getElementById("shortsToggle");
   const playablesToggle = document.getElementById("playablesToggle");
+  const sponsoredVideosToggle = document.getElementById("sponsoredVideosToggle");
   const primetimeToggle = document.getElementById("primetimeToggle");
+  const movieRecommendationsToggle = document.getElementById(
+    "movieRecommendationsToggle"
+  );
+  const documentaryRecommendationsToggle = document.getElementById(
+    "documentaryRecommendationsToggle"
+  );
+  const musicVideoRecommendationsToggle = document.getElementById(
+    "musicVideoRecommendationsToggle"
+  );
+  const premiumSectionsDismissalToggle = document.getElementById(
+    "premiumSectionsDismissalToggle"
+  );
   const keywordDismissalToggle = document.getElementById(
     "keywordDismissalToggle"
   );
@@ -41,7 +54,12 @@
     {
       shortsBlocked: true,
       playablesBlocked: true,
+      sponsoredVideosBlocked: true,
       primetimeBlocked: true,
+      movieRecommendationsBlocked: true,
+      documentaryRecommendationsBlocked: null,
+      musicVideoRecommendationsBlocked: true,
+      premiumSectionsDismissalEnabled: false,
       keywordDismissalEnabled: false,
       channelBlockingEnabled: false,
       playlistDismissalEnabled: false,
@@ -57,7 +75,17 @@
     (result) => {
       shortsToggle.checked = result.shortsBlocked;
       playablesToggle.checked = result.playablesBlocked;
+      sponsoredVideosToggle.checked = result.sponsoredVideosBlocked;
       primetimeToggle.checked = result.primetimeBlocked;
+      movieRecommendationsToggle.checked = result.movieRecommendationsBlocked;
+      documentaryRecommendationsToggle.checked =
+        typeof result.documentaryRecommendationsBlocked === "boolean"
+          ? result.documentaryRecommendationsBlocked
+          : result.movieRecommendationsBlocked;
+      musicVideoRecommendationsToggle.checked =
+        result.musicVideoRecommendationsBlocked;
+      premiumSectionsDismissalToggle.checked =
+        result.premiumSectionsDismissalEnabled;
       keywordDismissalToggle.checked = result.keywordDismissalEnabled;
       channelBlockingToggle.checked = result.channelBlockingEnabled;
       playlistDismissalToggle.checked = result.playlistDismissalEnabled;
@@ -146,8 +174,38 @@
     chrome.storage.sync.set({ playablesBlocked: playablesToggle.checked });
   });
 
+  sponsoredVideosToggle.addEventListener("change", () => {
+    chrome.storage.sync.set({
+      sponsoredVideosBlocked: sponsoredVideosToggle.checked,
+    });
+  });
+
   primetimeToggle.addEventListener("change", () => {
     chrome.storage.sync.set({ primetimeBlocked: primetimeToggle.checked });
+  });
+
+  movieRecommendationsToggle.addEventListener("change", () => {
+    chrome.storage.sync.set({
+      movieRecommendationsBlocked: movieRecommendationsToggle.checked,
+    });
+  });
+
+  documentaryRecommendationsToggle.addEventListener("change", () => {
+    chrome.storage.sync.set({
+      documentaryRecommendationsBlocked: documentaryRecommendationsToggle.checked,
+    });
+  });
+
+  musicVideoRecommendationsToggle.addEventListener("change", () => {
+    chrome.storage.sync.set({
+      musicVideoRecommendationsBlocked: musicVideoRecommendationsToggle.checked,
+    });
+  });
+
+  premiumSectionsDismissalToggle.addEventListener("change", () => {
+    chrome.storage.sync.set({
+      premiumSectionsDismissalEnabled: premiumSectionsDismissalToggle.checked,
+    });
   });
 
   keywordDismissalToggle.addEventListener("change", () => {
@@ -354,9 +412,17 @@
     chrome.storage.sync.set({ [storageKey]: list });
   }
 
-  function renderList(listEl, list, save) {
+  function listItemMatchesFilter(item, filterText) {
+    const query = filterText.trim().toLowerCase();
+    if (!query) return true;
+    return item.text.toLowerCase().includes(query);
+  }
+
+  function renderList(listEl, list, save, filterText = "") {
     listEl.innerHTML = "";
     list.forEach((item, index) => {
+      if (!listItemMatchesFilter(item, filterText)) return;
+
       const li = document.createElement("li");
 
       const text = document.createElement("span");
@@ -370,7 +436,7 @@
       caseBtn.addEventListener("click", () => {
         list[index].caseSensitive = !list[index].caseSensitive;
         save();
-        renderList(listEl, list, save);
+        renderList(listEl, list, save, filterText);
       });
 
       const removeBtn = document.createElement("button");
@@ -379,7 +445,7 @@
       removeBtn.addEventListener("click", () => {
         list.splice(index, 1);
         save();
-        renderList(listEl, list, save);
+        renderList(listEl, list, save, filterText);
       });
 
       li.append(text, caseBtn, removeBtn);
@@ -407,11 +473,11 @@
   }
 
   function renderKeywords() {
-    renderList(keywordList, keywords, saveKeywords);
+    renderList(keywordList, keywords, saveKeywords, keywordInput.value);
   }
 
   function renderChannels() {
-    renderList(channelList, blockedChannels, saveChannels);
+    renderList(channelList, blockedChannels, saveChannels, channelInput.value);
   }
 
   function addKeyword() {
@@ -423,10 +489,12 @@
   }
 
   addKeywordBtn.addEventListener("click", addKeyword);
+  keywordInput.addEventListener("input", renderKeywords);
   keywordInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") addKeyword();
   });
   addChannelBtn.addEventListener("click", addChannel);
+  channelInput.addEventListener("input", renderChannels);
   channelInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") addChannel();
   });

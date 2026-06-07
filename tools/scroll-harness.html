@@ -30,6 +30,18 @@
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     }
 
+    ytd-brand-video-shelf-renderer,
+    video-display-button-group-layout-view-model {
+      display: block;
+      margin: 24px auto;
+      max-width: 760px;
+      min-height: 220px;
+      padding: 18px;
+      background: #fff;
+      border: 1px solid #ddd;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+
     #video-title {
       display: block;
       margin-bottom: 12px;
@@ -58,7 +70,7 @@
       height: 36px;
     }
 
-    ytd-menu-popup-renderer {
+    ytd-menu-service-item-renderer {
       display: block;
       position: fixed;
       top: 80px;
@@ -68,12 +80,6 @@
       background: #fff;
       border: 1px solid #bbb;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-
-    ytd-menu-service-item-renderer {
-      display: block;
-      padding: 8px 4px;
-      color: #111;
     }
   </style>
 </head>
@@ -96,128 +102,181 @@
       originalLog(...args);
     };
 
-    function navigateToVideo(videoId) {
-      window.__harnessNavigationAttempts += 1;
-      history.pushState({}, "", `/watch?v=${videoId}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }
+    function attachNotInterestedMenu(card, button) {
+      button.addEventListener("click", () => {
+        window.__harnessMenuClicks += 1;
+        // Simulate YouTube page-world behavior that a content-script prototype
+        // patch cannot intercept: jump to the real card location.
+        nativeScrollTo(0, card.offsetTop);
 
-    function createNotInterestedItem(card, mode) {
-      if (mode === "anchor-not-interested") {
-        const anchor = document.createElement("a");
-        anchor.href = "/watch?v=anchor-not-interested";
-        anchor.textContent = "Not interested";
-        anchor.addEventListener("click", (event) => {
-          event.preventDefault();
+        document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
+          el.remove();
+        });
+        const menu = document.createElement("ytd-menu-popup-renderer");
+        menu.setAttribute("role", "menu");
+        const item = document.createElement("ytd-menu-service-item-renderer");
+        item.setAttribute("role", "menuitem");
+        item.textContent = "Not interested";
+        item.addEventListener("click", () => {
           window.__harnessNotInterestedClicks += 1;
           nativeScrollTo(0, card.offsetTop);
-          navigateToVideo("anchor-not-interested");
+          menu.remove();
         });
-        return anchor;
-      }
-
-      const item = document.createElement("ytd-menu-service-item-renderer");
-      item.setAttribute("role", "menuitem");
-      item.textContent = "Not interested";
-      item.addEventListener("click", () => {
-        window.__harnessNotInterestedClicks += 1;
-        nativeScrollTo(0, card.offsetTop);
-        if (mode === "menu-item-navigates") {
-          navigateToVideo("menu-item-navigates");
-        }
-        item.closest("ytd-menu-popup-renderer")?.remove();
+        menu.appendChild(item);
+        document.body.appendChild(menu);
       });
-      return item;
     }
 
-    function appendPopupForCard(card, mode = "safe") {
-      document.querySelectorAll("ytd-menu-popup-renderer:not([data-stale='true'])").forEach((el) => {
-        el.remove();
-      });
-      const menu = document.createElement("ytd-menu-popup-renderer");
-      menu.setAttribute("role", "menu");
-      menu.dataset.ownerTitle = card.querySelector("#video-title")?.textContent || "";
-      menu.appendChild(createNotInterestedItem(card, mode));
-      document.body.appendChild(menu);
-    }
-
-    function appendStalePopup() {
-      const menu = document.createElement("ytd-menu-popup-renderer");
-      menu.setAttribute("role", "menu");
-      menu.dataset.stale = "true";
-      const item = document.createElement("ytd-menu-service-item-renderer");
-      item.setAttribute("role", "menuitem");
-      item.textContent = "Not interested";
-      item.addEventListener("click", () => {
-        window.__harnessStaleNotInterestedClicks += 1;
-        menu.remove();
-      });
-      menu.appendChild(item);
-      document.body.appendChild(menu);
-    }
-
-    function appendVideo(index, title, duration, ageText, options = {}) {
+    function appendVideo(index, title, duration, ageText) {
       const card = document.createElement("ytd-rich-item-renderer");
-      const buttonHtml = `<button type="button" aria-label="More actions">...</button>`;
       card.innerHTML = `
-        ${options.buttonInAnchor ? `<a href="/watch?v=button-anchor-${index}" class="menu-link-wrapper">${buttonHtml}</a>` : buttonHtml}
-        <a id="video-title" title="${title}" href="/watch?v=video-${index}">${title}</a>
+        <button type="button" aria-label="More actions">...</button>
+        <a id="video-title" title="${title}">${title}</a>
         <div id="metadata-line"><span>${ageText}</span><span>1K views</span></div>
         <ytd-thumbnail-overlay-time-status-renderer>
           <span id="text">${duration}</span>
         </ytd-thumbnail-overlay-time-status-renderer>
       `;
 
-      const button = card.querySelector("button");
-      button.addEventListener("click", (event) => {
-        window.__harnessMenuClicks += 1;
-        // Simulate YouTube page-world behavior that a content-script prototype
-        // patch cannot intercept: jump to the real card location.
-        nativeScrollTo(0, card.offsetTop);
-
-        if (options.menuMode === "button-navigates") {
-          event.preventDefault();
-          navigateToVideo(`button-${index}`);
-          return;
-        }
-
-        if (options.menuMode === "no-popup") {
-          return;
-        }
-
-        appendPopupForCard(card, options.menuMode || "safe");
-      });
+      attachNotInterestedMenu(card, card.querySelector("button"));
 
       document.getElementById("contents").appendChild(card);
     }
 
-    function resetFeed(options = {}) {
+    function appendPremiumShelf() {
+      const title = "Listen in the background with YouTube Premium";
+      const shelf = document.createElement("ytd-brand-video-shelf-renderer");
+      shelf.innerHTML = `
+        <div id="content-wrapper">
+          <div id="shelf-header-container">
+            <div id="section-header-container">
+              <h2>${title}</h2>
+              <div class="ytBadgeShapeText">YouTube featured</div>
+            </div>
+            <div id="subtitle-container">
+              <yt-formatted-string id="subtitle">Listen to podcasts in the background, screen off.</yt-formatted-string>
+            </div>
+            <div id="top-buttons-container">
+              <a href="/premium?ybp=test" aria-label="Try 1 month for $0">Try 1 month for $0</a>
+              <ytd-menu-renderer>
+                <button type="button" aria-label="${title} - More actions">...</button>
+              </ytd-menu-renderer>
+            </div>
+          </div>
+        </div>
+      `;
+
+      attachNotInterestedMenu(shelf, shelf.querySelector("button"));
+      document.getElementById("contents").appendChild(shelf);
+    }
+
+    function appendSponsoredVideo() {
+      const ad = document.createElement("video-display-button-group-layout-view-model");
+      ad.innerHTML = `
+        <div>
+          <yt-lockup-view-model>
+            <div class="ytLockupViewModelHost content-id-8_kmWOsxcXs">
+              <a id="video-title" class="ytLockupViewModelContentImage" href="https://www.googleadservices.com/pagead/aclk?video_id=8_kmWOsxcXs" rel="nofollow">
+                They don't care if you can't afford a ransom.
+              </a>
+              <div class="ytLockupViewModelMetadata">
+                <feed-ad-metadata-view-model>
+                  <ad-badge-view-model>
+                    <badge-shape class="ytBadgeShapeHost ytBadgeShapeAd">
+                      <div class="ytBadgeShapeText">Sponsored</div>
+                    </badge-shape>
+                  </ad-badge-view-model>
+                  <ad-details-line-view-model>Huntress</ad-details-line-view-model>
+                </feed-ad-metadata-view-model>
+                <ad-button-group-view-model>
+                  <a href="/watch?v=8_kmWOsxcXs">Watch</a>
+                  <a href="https://www.googleadservices.com/pagead/aclk?video_id=8_kmWOsxcXs" rel="nofollow">Learn more</a>
+                </ad-button-group-view-model>
+              </div>
+            </div>
+          </yt-lockup-view-model>
+        </div>
+      `;
+
+      document.getElementById("contents").appendChild(ad);
+    }
+
+    function createModernLockupVideo({ title, videoId, channelName, channelHref }) {
+      const card = document.createElement("div");
+      card.className = `ytLockupViewModelHost ytLockupViewModelVertical content-id-${videoId}`;
+      card.style.minHeight = "180px";
+      card.style.display = "block";
+      card.innerHTML = `
+        <a href="/watch?v=${videoId}" class="ytLockupViewModelContentImage"></a>
+        <div class="ytLockupViewModelMetadata">
+          <yt-lockup-metadata-view-model class="ytLockupMetadataViewModelHost">
+            <div class="ytLockupMetadataViewModelTextContainer">
+              <h3 class="ytLockupMetadataViewModelHeadingReset" title="${title}">
+                <a href="/watch?v=${videoId}" class="ytLockupMetadataViewModelTitle" aria-label="${title} 27 minutes">
+                  <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">${title}</span>
+                </a>
+              </h3>
+              <div class="ytLockupMetadataViewModelMetadata">
+                <yt-content-metadata-view-model class="ytContentMetadataViewModelHost">
+                  <div role="group" class="ytContentMetadataViewModelMetadataRow">
+                    <span class="ytAttributedStringHost ytContentMetadataViewModelMetadataText">
+                      <span><a class="ytAttributedStringLink ytAttributedStringLinkCallToActionColor ytAttributedStringLinkInheritColor" href="${channelHref}">${channelName}</a></span>
+                    </span>
+                  </div>
+                  <div role="group" class="ytContentMetadataViewModelMetadataRow">
+                    <span>23K views</span><span>1 day ago</span>
+                  </div>
+                </yt-content-metadata-view-model>
+              </div>
+            </div>
+            <div class="ytLockupMetadataViewModelMenuButton">
+              <button type="button" aria-label="More actions">...</button>
+            </div>
+          </yt-lockup-metadata-view-model>
+        </div>
+      `;
+
+      attachNotInterestedMenu(card, card.querySelector("button"));
+      return card;
+    }
+
+    function appendModernLockupVideo() {
+      document.getElementById("contents").appendChild(createModernLockupVideo({
+        title: "AI Bubble Will Burst Eventually Says Bridgewater's Ray Dalio",
+        videoId: "WZ7mmTrSgxI",
+        channelName: "Bloomberg Podcasts",
+        channelHref: "/@BloombergPodcasts",
+      }));
+    }
+
+    function prependPbsNorthLockupVideo() {
+      const contents = document.getElementById("contents");
+      contents.prepend(createModernLockupVideo({
+        title: "The Trillion-Dollar Gas Hunt: Minnesota’s Massive Helium Discovery | In Business",
+        videoId: "NoxHubOdxIk",
+        channelName: "PBS North",
+        channelHref: "/@PBSNorth",
+      }));
+      nativeScrollTo(0, 0);
+    }
+
+    function resetFeed() {
       document.getElementById("contents").textContent = "";
       document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
         el.remove();
       });
-      history.replaceState({}, "", "/");
-      logs.length = 0;
       window.__harnessMenuClicks = 0;
       window.__harnessNotInterestedClicks = 0;
-      window.__harnessStaleNotInterestedClicks = 0;
-      window.__harnessNavigationAttempts = 0;
 
-      const targetIndex = options.targetIndex || 35;
-      const targetOptions = options.targetOptions || {};
-      for (let i = 1; i <= 48; i += 1) {
-        if (i === targetIndex) {
-          appendVideo(i, "BLOCKME keyword target", "2:30:00", "5 years ago", targetOptions);
-        } else {
-          appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
-        }
+      for (let i = 1; i <= 34; i += 1) {
+        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
+      }
+      appendVideo(35, "BLOCKME offscreen keyword target", "2:30:00", "5 years ago");
+      for (let i = 36; i <= 48; i += 1) {
+        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
       }
 
-      if (options.stalePopup) {
-        appendStalePopup();
-      }
-
-      nativeScrollTo(0, options.scrollY ?? 360);
+      nativeScrollTo(0, 360);
     }
 
     window.__ytbHarness = {
@@ -226,6 +285,11 @@
       nativeScrollBy,
       nativeScrollIntoView,
       resetFeed,
+      appendVideo,
+      appendPremiumShelf,
+      appendSponsoredVideo,
+      appendModernLockupVideo,
+      prependPbsNorthLockupVideo,
       setChromeSettings(settings) {
         window.chrome = {
           storage: {
@@ -243,17 +307,11 @@
       },
       snapshot() {
         return {
-          href: location.href,
-          pathname: location.pathname,
           scrollY: window.scrollY,
           menuClicks: window.__harnessMenuClicks,
           notInterestedClicks: window.__harnessNotInterestedClicks,
-          staleNotInterestedClicks: window.__harnessStaleNotInterestedClicks,
-          navigationAttempts: window.__harnessNavigationAttempts,
           cardCount: document.querySelectorAll("ytd-rich-item-renderer").length,
-          popupCount: document.querySelectorAll("ytd-menu-popup-renderer").length,
-          removedNoticeCount: document.querySelectorAll("[data-ytb-removed='true'] .ytb-removed-video-notice").length,
-          removedFilters: [...document.querySelectorAll(".ytb-removed-video-notice__filter")].map((el) => el.textContent.trim()),
+          premiumShelfCount: document.querySelectorAll("ytd-brand-video-shelf-renderer").length,
           logs,
         };
       },
