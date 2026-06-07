@@ -123,6 +123,10 @@ async function runScenario(cdp, sessionId, scenario) {
   const before = await evaluate(cdp, sessionId, "window.__ytbHarness.snapshot()");
   await evaluate(cdp, sessionId, contentScript, false);
 
+  const safeGateResult = scenario.safeGateExpression
+    ? await evaluate(cdp, sessionId, scenario.safeGateExpression)
+    : { passed: true };
+
   if (scenario.wheelAtMs) {
     await wait(scenario.wheelAtMs);
     await cdp.send("Input.dispatchMouseEvent", {
@@ -168,9 +172,17 @@ async function runScenario(cdp, sessionId, scenario) {
   const blockedSelectorPassed = !scenario.expectedBlockedSelector ||
     expectedBlockedSelectorMatched;
   const passed = scrollPassed && cardCountPassed && premiumShelfCountPassed &&
-    missingTitlePassed && blockedSelectorPassed;
+    missingTitlePassed && blockedSelectorPassed && safeGateResult.passed;
 
-  return { name: scenario.name, passed, before, after, delta, expectedDelta };
+  return {
+    name: scenario.name,
+    passed,
+    before,
+    after,
+    delta,
+    expectedDelta,
+    safeGateResult,
+  };
 }
 
 async function removeWithRetry(path) {
@@ -216,6 +228,56 @@ try {
   await evaluate(cdp, sessionId, "document.readyState");
 
   const scenarios = [
+    {
+      name: "safe gate helper rejects navigational menu targets",
+      safeGateExpression: `
+        (() => {
+          const hooks = window.__ytbSafeGateTestHooks;
+          const card = document.createElement("ytd-rich-item-renderer");
+          const link = document.createElement("a");
+          link.href = "/watch?v=button-anchor-test";
+          const unsafeButton = document.createElement("button");
+          unsafeButton.setAttribute("aria-label", "More actions");
+          link.appendChild(unsafeButton);
+          card.appendChild(link);
+          document.getElementById("contents").appendChild(card);
+          const unsafeButtonResult = hooks.validateMenuButtonForTarget(card, unsafeButton);
+
+          const safeItem = document.createElement("ytd-menu-service-item-renderer");
+          safeItem.setAttribute("role", "menuitem");
+          safeItem.textContent = "Not interested";
+          document.body.appendChild(safeItem);
+          const safeItemResult = hooks.validateNotInterestedCommand(safeItem);
+          safeItem.remove();
+
+          const anchorItem = document.createElement("a");
+          anchorItem.href = "/watch?v=unsafe";
+          anchorItem.textContent = "Not interested";
+          document.body.appendChild(anchorItem);
+          const anchorItemResult = hooks.validateNotInterestedCommand(anchorItem);
+          anchorItem.remove();
+
+          const passed = hooks.isDismissalSafePage() &&
+            unsafeButtonResult.ok === false &&
+            unsafeButtonResult.reason === "menu button is inside a navigation link" &&
+            safeItemResult.ok === true &&
+            anchorItemResult.ok === false &&
+            anchorItemResult.reason === "menu command click target is navigational";
+
+          return {
+            passed,
+            unsafeButtonReason: unsafeButtonResult.reason,
+            safeItemOk: safeItemResult.ok,
+            anchorItemReason: anchorItemResult.reason,
+          };
+        })()
+      `,
+      settings: {
+        keywordDismissalEnabled: false,
+        dismissalDelayMinSeconds: 1,
+        dismissalDelayMaxSeconds: 1,
+      },
+    },
     {
       name: "keyword offscreen safe remove",
       settings: {
@@ -456,6 +518,9 @@ try {
       `menuClicks=${result.after.menuClicks} notInterestedClicks=${result.after.notInterestedClicks} ` +
       `cardCount=${result.after.cardCount} premiumShelfCount=${result.after.premiumShelfCount}`
     );
+    if (!result.safeGateResult?.passed && result.safeGateResult) {
+      console.log(`  safeGate=${JSON.stringify(result.safeGateResult)}`);
+    }
   }
 
   if (results.some((result) => !result.passed)) {

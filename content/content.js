@@ -35,6 +35,8 @@
 
   const MENU_ITEM_SELECTORS =
     "ytd-menu-service-item-renderer, tp-yt-paper-item, [role='menuitem'], [role='option'], .ytListItemViewModelContainer, .ytListItemViewModelButtonOrAnchor, a, button, li";
+  const MENU_BUTTON_SELECTORS =
+    "button[aria-label='More actions'], button[aria-label='Action menu'], ytd-menu-renderer button, yt-icon-button.dropdown-trigger";
 
   // --- Page Type Detection ---
 
@@ -98,6 +100,7 @@
   let pageFilterActionCount = 0;
   let dismissalBudgetLogged = false;
   let blockedPlaylistIds = new Set();
+  let menuAutomationDisabledForPage = false;
 
   // --- Shared Helpers ---
 
@@ -1436,6 +1439,184 @@
     document.body.click();
   }
 
+  // --- Safe Dismissal Gate Helpers ---
+
+  function createSafeActionResult(ok, reason, target = null, details = {}) {
+    return { ok, reason: reason || "", target, details };
+  }
+
+  function isDismissalSafePage(pageType = currentPageType) {
+    return pageType === "feed" || pageType === "search";
+  }
+
+  function getElementIdentitySnapshot(el) {
+    if (!el) {
+      return {
+        connected: false,
+        title: "",
+        hrefs: [],
+        textFingerprint: "",
+        rect: null,
+      };
+    }
+
+    const rect = el.getBoundingClientRect();
+    const hrefs = [...el.querySelectorAll("a[href]")]
+      .map((link) => link.getAttribute("href") || "")
+      .filter(Boolean)
+      .slice(0, 8);
+
+    return {
+      connected: el.isConnected,
+      title: getFilterTargetLabel(el),
+      hrefs,
+      textFingerprint: normalizeText(el.textContent || "").slice(0, 240),
+      rect: {
+        top: Math.round(rect.top),
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+    };
+  }
+
+  function hasNavigationLinkAncestor(el, scopeEl = null) {
+    const link = el?.closest?.("a[href], area[href]");
+    return Boolean(link && (!scopeEl || scopeEl.contains(link)));
+  }
+
+  function validateMenuButtonForTarget(targetEl, menuButton) {
+    if (menuAutomationDisabledForPage) {
+      return createSafeActionResult(false, "menu automation disabled after navigation");
+    }
+    if (!isDismissalSafePage()) {
+      return createSafeActionResult(false, "page is not eligible for menu dismissal");
+    }
+    if (!targetEl || !targetEl.isConnected) {
+      return createSafeActionResult(false, "target is not connected");
+    }
+    if (!menuButton || !menuButton.isConnected) {
+      return createSafeActionResult(false, "menu button not found");
+    }
+    if (!targetEl.contains(menuButton)) {
+      return createSafeActionResult(false, "menu button is outside target");
+    }
+    if (hasNavigationLinkAncestor(menuButton, targetEl)) {
+      return createSafeActionResult(false, "menu button is inside a navigation link");
+    }
+
+    const owner = menuButton.closest(
+      VIDEO_SELECTOR + ", ytd-brand-video-shelf-renderer"
+    );
+    if (owner && owner !== targetEl) {
+      return createSafeActionResult(false, "menu button owner does not match target");
+    }
+
+    return createSafeActionResult(true, "", menuButton, {
+      target: getElementIdentitySnapshot(targetEl),
+    });
+  }
+
+  function getVisiblePopups() {
+    return [...document.querySelectorAll(POPUP_SELECTORS)].filter((popup) => {
+      if (popup.getAttribute("aria-hidden") === "true") return false;
+      return getComputedStyle(popup).display !== "none";
+    });
+  }
+
+  function capturePopupSnapshot() {
+    return {
+      popups: getVisiblePopups(),
+      capturedAt: Date.now(),
+    };
+  }
+
+  function getFreshVisiblePopups(snapshot) {
+    const existingPopups = new Set(snapshot?.popups || []);
+    return getVisiblePopups().filter((popup) => !existingPopups.has(popup));
+  }
+
+  function normalizeMenuCommandText(text) {
+    return normalizeText(String(text || "").toLowerCase());
+  }
+
+  function validateNotInterestedCommand(item) {
+    if (!item || !item.isConnected) {
+      return createSafeActionResult(false, "not interested command not found");
+    }
+
+    const commandText = normalizeMenuCommandText(item.textContent);
+    if (commandText !== "not interested") {
+      return createSafeActionResult(false, "menu command text is not exact", null, {
+        commandText,
+      });
+    }
+
+    const clickTarget = getMenuItemClickTarget(item);
+    if (!clickTarget || !clickTarget.isConnected) {
+      return createSafeActionResult(false, "menu command click target is not connected");
+    }
+    if (clickTarget.matches("a[href], area[href]") || hasNavigationLinkAncestor(clickTarget, item)) {
+      return createSafeActionResult(false, "menu command click target is navigational");
+    }
+
+    return createSafeActionResult(true, "", clickTarget, { commandText });
+  }
+
+  function findSafeNotInterestedItem(snapshot) {
+    for (const popup of getFreshVisiblePopups(snapshot)) {
+      const candidates = [
+        ...(popup.matches(MENU_ITEM_SELECTORS) ? [popup] : []),
+        ...popup.querySelectorAll(MENU_ITEM_SELECTORS),
+      ];
+
+      for (const item of candidates) {
+        const validation = validateNotInterestedCommand(item);
+        if (validation.ok) return validation;
+      }
+    }
+
+    return createSafeActionResult(false, "fresh safe not interested command not found");
+  }
+
+  function createNavigationGuard() {
+    const href = location.href;
+    let navigated = false;
+    const markNavigated = () => {
+      navigated = true;
+      menuAutomationDisabledForPage = true;
+    };
+
+    window.addEventListener("yt-navigate-start", markNavigated, { once: true });
+    window.addEventListener("popstate", markNavigated, { once: true });
+
+    return {
+      didNavigate() {
+        if (location.href !== href) markNavigated();
+        return navigated;
+      },
+      release() {
+        window.removeEventListener("yt-navigate-start", markNavigated);
+        window.removeEventListener("popstate", markNavigated);
+      },
+    };
+  }
+
+  function installSafeGateTestHooks() {
+    if (!window.__ytbHarness) return;
+    window.__ytbSafeGateTestHooks = {
+      capturePopupSnapshot,
+      createNavigationGuard,
+      getElementIdentitySnapshot,
+      getFreshVisiblePopups,
+      isDismissalSafePage,
+      normalizeMenuCommandText,
+      validateMenuButtonForTarget,
+      validateNotInterestedCommand,
+      findSafeNotInterestedItem,
+    };
+  }
+
   function getScrollingElement() {
     return document.scrollingElement || document.documentElement;
   }
@@ -1658,7 +1839,7 @@
 
       const menuButton = await waitForElement(
         videoEl,
-        "button[aria-label='More actions'], button[aria-label='Action menu'], ytd-menu-renderer button, yt-icon-button.dropdown-trigger",
+        MENU_BUTTON_SELECTORS,
         2000
       );
       if (!menuButton) {
@@ -1943,6 +2124,7 @@
 
   function init() {
     loadSettings();
+    installSafeGateTestHooks();
 
     if (document.body) {
       startObserver();
@@ -1953,6 +2135,7 @@
 
   function onNavigate() {
     currentPageType = getPageType();
+    menuAutomationDisabledForPage = false;
     console.log("[YTBlocker] Page type:", currentPageType);
 
     clearInterval(scanIntervalId);
