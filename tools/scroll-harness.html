@@ -58,7 +58,7 @@
       height: 36px;
     }
 
-    ytd-menu-service-item-renderer {
+    ytd-menu-popup-renderer {
       display: block;
       position: fixed;
       top: 80px;
@@ -68,6 +68,12 @@
       background: #fff;
       border: 1px solid #bbb;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    ytd-menu-service-item-renderer {
+      display: block;
+      padding: 8px 4px;
+      color: #111;
     }
   </style>
 </head>
@@ -90,11 +96,72 @@
       originalLog(...args);
     };
 
-    function appendVideo(index, title, duration, ageText) {
+    function navigateToVideo(videoId) {
+      window.__harnessNavigationAttempts += 1;
+      history.pushState({}, "", `/watch?v=${videoId}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+
+    function createNotInterestedItem(card, mode) {
+      if (mode === "anchor-not-interested") {
+        const anchor = document.createElement("a");
+        anchor.href = "/watch?v=anchor-not-interested";
+        anchor.textContent = "Not interested";
+        anchor.addEventListener("click", (event) => {
+          event.preventDefault();
+          window.__harnessNotInterestedClicks += 1;
+          nativeScrollTo(0, card.offsetTop);
+          navigateToVideo("anchor-not-interested");
+        });
+        return anchor;
+      }
+
+      const item = document.createElement("ytd-menu-service-item-renderer");
+      item.setAttribute("role", "menuitem");
+      item.textContent = "Not interested";
+      item.addEventListener("click", () => {
+        window.__harnessNotInterestedClicks += 1;
+        nativeScrollTo(0, card.offsetTop);
+        if (mode === "menu-item-navigates") {
+          navigateToVideo("menu-item-navigates");
+        }
+        item.closest("ytd-menu-popup-renderer")?.remove();
+      });
+      return item;
+    }
+
+    function appendPopupForCard(card, mode = "safe") {
+      document.querySelectorAll("ytd-menu-popup-renderer:not([data-stale='true'])").forEach((el) => {
+        el.remove();
+      });
+      const menu = document.createElement("ytd-menu-popup-renderer");
+      menu.setAttribute("role", "menu");
+      menu.dataset.ownerTitle = card.querySelector("#video-title")?.textContent || "";
+      menu.appendChild(createNotInterestedItem(card, mode));
+      document.body.appendChild(menu);
+    }
+
+    function appendStalePopup() {
+      const menu = document.createElement("ytd-menu-popup-renderer");
+      menu.setAttribute("role", "menu");
+      menu.dataset.stale = "true";
+      const item = document.createElement("ytd-menu-service-item-renderer");
+      item.setAttribute("role", "menuitem");
+      item.textContent = "Not interested";
+      item.addEventListener("click", () => {
+        window.__harnessStaleNotInterestedClicks += 1;
+        menu.remove();
+      });
+      menu.appendChild(item);
+      document.body.appendChild(menu);
+    }
+
+    function appendVideo(index, title, duration, ageText, options = {}) {
       const card = document.createElement("ytd-rich-item-renderer");
+      const buttonHtml = `<button type="button" aria-label="More actions">...</button>`;
       card.innerHTML = `
-        <button type="button" aria-label="More actions">...</button>
-        <a id="video-title" title="${title}">${title}</a>
+        ${options.buttonInAnchor ? `<a href="/watch?v=button-anchor-${index}" class="menu-link-wrapper">${buttonHtml}</a>` : buttonHtml}
+        <a id="video-title" title="${title}" href="/watch?v=video-${index}">${title}</a>
         <div id="metadata-line"><span>${ageText}</span><span>1K views</span></div>
         <ytd-thumbnail-overlay-time-status-renderer>
           <span id="text">${duration}</span>
@@ -102,49 +169,55 @@
       `;
 
       const button = card.querySelector("button");
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
         window.__harnessMenuClicks += 1;
         // Simulate YouTube page-world behavior that a content-script prototype
         // patch cannot intercept: jump to the real card location.
         nativeScrollTo(0, card.offsetTop);
 
-        document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
-          el.remove();
-        });
-        const menu = document.createElement("ytd-menu-popup-renderer");
-        menu.setAttribute("role", "menu");
-        const item = document.createElement("ytd-menu-service-item-renderer");
-        item.setAttribute("role", "menuitem");
-        item.textContent = "Not interested";
-        item.addEventListener("click", () => {
-          window.__harnessNotInterestedClicks += 1;
-          nativeScrollTo(0, card.offsetTop);
-          menu.remove();
-        });
-        menu.appendChild(item);
-        document.body.appendChild(menu);
+        if (options.menuMode === "button-navigates") {
+          event.preventDefault();
+          navigateToVideo(`button-${index}`);
+          return;
+        }
+
+        if (options.menuMode === "no-popup") {
+          return;
+        }
+
+        appendPopupForCard(card, options.menuMode || "safe");
       });
 
       document.getElementById("contents").appendChild(card);
     }
 
-    function resetFeed() {
+    function resetFeed(options = {}) {
       document.getElementById("contents").textContent = "";
       document.querySelectorAll("ytd-menu-popup-renderer").forEach((el) => {
         el.remove();
       });
+      history.replaceState({}, "", "/");
+      logs.length = 0;
       window.__harnessMenuClicks = 0;
       window.__harnessNotInterestedClicks = 0;
+      window.__harnessStaleNotInterestedClicks = 0;
+      window.__harnessNavigationAttempts = 0;
 
-      for (let i = 1; i <= 34; i += 1) {
-        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
-      }
-      appendVideo(35, "BLOCKME offscreen keyword target", "2:30:00", "5 years ago");
-      for (let i = 36; i <= 48; i += 1) {
-        appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
+      const targetIndex = options.targetIndex || 35;
+      const targetOptions = options.targetOptions || {};
+      for (let i = 1; i <= 48; i += 1) {
+        if (i === targetIndex) {
+          appendVideo(i, "BLOCKME keyword target", "2:30:00", "5 years ago", targetOptions);
+        } else {
+          appendVideo(i, `Regular video ${i}`, "10:00", "2 days ago");
+        }
       }
 
-      nativeScrollTo(0, 360);
+      if (options.stalePopup) {
+        appendStalePopup();
+      }
+
+      nativeScrollTo(0, options.scrollY ?? 360);
     }
 
     window.__ytbHarness = {
@@ -170,10 +243,15 @@
       },
       snapshot() {
         return {
+          href: location.href,
+          pathname: location.pathname,
           scrollY: window.scrollY,
           menuClicks: window.__harnessMenuClicks,
           notInterestedClicks: window.__harnessNotInterestedClicks,
+          staleNotInterestedClicks: window.__harnessStaleNotInterestedClicks,
+          navigationAttempts: window.__harnessNavigationAttempts,
           cardCount: document.querySelectorAll("ytd-rich-item-renderer").length,
+          popupCount: document.querySelectorAll("ytd-menu-popup-renderer").length,
           logs,
         };
       },

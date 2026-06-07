@@ -108,10 +108,52 @@ async function evaluate(cdp, sessionId, expression, awaitPromise = true) {
   return result.result.value;
 }
 
+function keywordSettings() {
+  return {
+    keywordDismissalEnabled: true,
+    keywords: [{ text: "BLOCKME", caseSensitive: false }],
+    dismissalDelayMinSeconds: 1,
+    dismissalDelayMaxSeconds: 1,
+  };
+}
+
+function checkEqual(checks, label, actual, expected) {
+  if (expected === undefined) return;
+  checks.push({ label, actual, expected, passed: actual === expected });
+}
+
+function checkDelta(checks, actual, expected) {
+  if (expected === undefined) return;
+  checks.push({
+    label: "scroll delta",
+    actual,
+    expected,
+    passed: Math.abs(actual - expected) <= 2,
+  });
+}
+
+function checkUrlUnchanged(checks, before, after, expected) {
+  if (expected === undefined) return;
+  checks.push({
+    label: "URL unchanged",
+    actual: after.href,
+    expected: before.href,
+    passed: expected ? after.href === before.href : after.href !== before.href,
+  });
+}
+
 async function runScenario(cdp, sessionId, scenario) {
   const contentScript = await readFile(new URL("content/content.js", ROOT), "utf8");
+  const feedOptions = scenario.feedOptions || {};
 
-  await evaluate(cdp, sessionId, "window.__ytbHarness.resetFeed()");
+  await evaluate(
+    cdp,
+    sessionId,
+    `window.__ytbHarness.resetFeed(${JSON.stringify(feedOptions)})`
+  );
+  if (scenario.setupExpression) {
+    await evaluate(cdp, sessionId, scenario.setupExpression);
+  }
   await evaluate(
     cdp,
     sessionId,
@@ -131,15 +173,34 @@ async function runScenario(cdp, sessionId, scenario) {
     }, sessionId);
     await wait(Math.max(0, 4500 - scenario.wheelAtMs));
   } else {
-    await wait(4500);
+    await wait(scenario.waitMs || 4500);
   }
 
   const after = await evaluate(cdp, sessionId, "window.__ytbHarness.snapshot()");
   const delta = after.scrollY - before.scrollY;
-  const expectedDelta = scenario.expectedDelta || 0;
-  const passed = Math.abs(delta - expectedDelta) <= 2;
+  const checks = [];
+  checkDelta(checks, delta, scenario.expectedDelta ?? 0);
+  checkEqual(checks, "menu clicks", after.menuClicks, scenario.expectedMenuClicks);
+  checkEqual(checks, "not interested clicks", after.notInterestedClicks, scenario.expectedNotInterestedClicks);
+  checkEqual(checks, "stale not interested clicks", after.staleNotInterestedClicks, scenario.expectedStaleNotInterestedClicks);
+  checkEqual(checks, "navigation attempts", after.navigationAttempts, scenario.expectedNavigationAttempts);
+  checkEqual(checks, "card count", after.cardCount, scenario.expectedCardCount);
+  checkEqual(checks, "pathname", after.pathname, scenario.expectedPathname);
+  checkUrlUnchanged(checks, before, after, scenario.expectUrlUnchanged);
 
-  return { name: scenario.name, passed, before, after, delta, expectedDelta };
+  const assertionsPassed = checks.every((check) => check.passed);
+  const passed = scenario.expectedFailure ? !assertionsPassed : assertionsPassed;
+
+  return {
+    name: scenario.name,
+    expectedFailure: Boolean(scenario.expectedFailure),
+    passed,
+    assertionsPassed,
+    before,
+    after,
+    delta,
+    checks,
+  };
 }
 
 async function removeWithRetry(path) {
@@ -187,23 +248,23 @@ try {
   const scenarios = [
     {
       name: "keyword offscreen safe remove",
-      settings: {
-        keywordDismissalEnabled: true,
-        keywords: [{ text: "BLOCKME", caseSensitive: false }],
-        dismissalDelayMinSeconds: 1,
-        dismissalDelayMaxSeconds: 1,
-      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 0,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedCardCount: 47,
+      expectUrlUnchanged: true,
     },
     {
       name: "keyword offscreen safe remove while user wheels",
       wheelAtMs: 900,
       expectedDelta: 160,
-      settings: {
-        keywordDismissalEnabled: true,
-        keywords: [{ text: "BLOCKME", caseSensitive: false }],
-        dismissalDelayMinSeconds: 1,
-        dismissalDelayMaxSeconds: 1,
-      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 0,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedCardCount: 47,
+      expectUrlUnchanged: true,
     },
     {
       name: "duration offscreen remove",
@@ -212,6 +273,11 @@ try {
         dismissalDelayMinSeconds: 1,
         dismissalDelayMaxSeconds: 1,
       },
+      expectedMenuClicks: 0,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedCardCount: 47,
+      expectUrlUnchanged: true,
     },
     {
       name: "age offscreen remove",
@@ -220,6 +286,78 @@ try {
         dismissalDelayMinSeconds: 1,
         dismissalDelayMaxSeconds: 1,
       },
+      expectedMenuClicks: 0,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedCardCount: 47,
+      expectUrlUnchanged: true,
+    },
+    {
+      name: "visible keyword safe not interested click",
+      feedOptions: { targetIndex: 3 },
+      settings: keywordSettings(),
+      expectedMenuClicks: 1,
+      expectedNotInterestedClicks: 1,
+      expectedNavigationAttempts: 0,
+      expectedCardCount: 47,
+      expectUrlUnchanged: true,
+    },
+    {
+      name: "unsafe menu button nested in video link should not be clicked",
+      expectedFailure: true,
+      feedOptions: {
+        targetIndex: 3,
+        targetOptions: { buttonInAnchor: true, menuMode: "button-navigates" },
+      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 0,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedPathname: "/",
+      expectUrlUnchanged: true,
+    },
+    {
+      name: "stale unowned popup should not receive not interested click",
+      expectedFailure: true,
+      feedOptions: {
+        targetIndex: 3,
+        stalePopup: true,
+        targetOptions: { menuMode: "no-popup" },
+      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 1,
+      expectedNotInterestedClicks: 0,
+      expectedStaleNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectUrlUnchanged: true,
+    },
+    {
+      name: "anchor-like not interested item should not be clicked",
+      expectedFailure: true,
+      feedOptions: {
+        targetIndex: 3,
+        targetOptions: { menuMode: "anchor-not-interested" },
+      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 1,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedPathname: "/",
+      expectUrlUnchanged: true,
+    },
+    {
+      name: "not interested command that navigates should trip URL guard",
+      expectedFailure: true,
+      feedOptions: {
+        targetIndex: 3,
+        targetOptions: { menuMode: "menu-item-navigates" },
+      },
+      settings: keywordSettings(),
+      expectedMenuClicks: 1,
+      expectedNotInterestedClicks: 0,
+      expectedNavigationAttempts: 0,
+      expectedPathname: "/",
+      expectUrlUnchanged: true,
     },
   ];
 
@@ -231,15 +369,28 @@ try {
   cdp.close();
 
   for (const result of results) {
-    const status = result.passed ? "PASS" : "FAIL";
+    let status = "FAIL";
+    if (result.expectedFailure && result.passed) {
+      status = "XFAIL";
+    } else if (result.expectedFailure && !result.passed) {
+      status = "XPASS";
+    } else if (result.passed) {
+      status = "PASS";
+    }
+
     console.log(
-      `${status} ${result.name}: scroll delta=${result.delta} expected=${result.expectedDelta}`
+      `${status} ${result.name}: scroll delta=${result.delta}`
     );
     console.log(
       `  before=${result.before.scrollY} after=${result.after.scrollY} ` +
       `menuClicks=${result.after.menuClicks} notInterestedClicks=${result.after.notInterestedClicks} ` +
-      `cardCount=${result.after.cardCount}`
+      `staleClicks=${result.after.staleNotInterestedClicks} navigationAttempts=${result.after.navigationAttempts} ` +
+      `path=${result.after.pathname} cardCount=${result.after.cardCount}`
     );
+    for (const check of result.checks) {
+      const checkStatus = check.passed ? "ok" : "not ok";
+      console.log(`    ${checkStatus}: ${check.label} actual=${check.actual} expected=${check.expected}`);
+    }
   }
 
   if (results.some((result) => !result.passed)) {
