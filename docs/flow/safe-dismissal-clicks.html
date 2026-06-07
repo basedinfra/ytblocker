@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>safe-dismissal-clicks — flow</title>
+  <style>
+    body { font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; max-width: 960px; color: #111; }
+    h1 { font-size: 18px; margin: 0 0 16px; }
+    .mermaid { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+    .legend { display: flex; gap: 12px; margin: 12px 0; font-size: 12px; }
+    .legend span { padding: 2px 8px; border-radius: 4px; }
+    .l-pending { background: #e5e7eb; color: #111827; }
+    .l-inProgress { background: #dbeafe; color: #1e3a8a; }
+    .l-inReview { background: #fef3c7; color: #78350f; }
+    .l-done { background: #d1fae5; color: #065f46; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "loose" });
+  </script>
+</head>
+<body>
+  <h1>safe-dismissal-clicks — flow</h1>
+  <div class="legend">
+    <span class="l-pending">pending</span>
+    <span class="l-inProgress">in progress</span>
+    <span class="l-inReview">in review</span>
+    <span class="l-done">done</span>
+  </div>
+  <div class="mermaid">
+graph TD
+    classDef pending fill:#e5e7eb,stroke:#6b7280,color:#111827
+    classDef inProgress fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef inReview fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef done fill:#d1fae5,stroke:#059669,color:#064e3b
+
+    phase-1["P1: Characterize unsafe click surface"]:::inProgress
+    phase-2["P2: Add safe gate helpers"]:::pending
+    phase-3["P3: Integrate gate and fallbacks"]:::pending
+    phase-4["P4: Verify and clean up"]:::pending
+
+    phase-1 --> phase-2
+    phase-2 --> phase-3
+    phase-3 --> phase-4
+  </div>
+</body>
+</html>
