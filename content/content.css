@@ -45,3 +45,44 @@ ytd-rich-section-renderer[data-ytb-primetime-blocked="true"],
 ytd-shelf-renderer[data-ytb-primetime-blocked="true"] {
   display: none !important;
 }
+
+ytd-rich-item-renderer[data-ytb-removed="true"],
+ytd-compact-video-renderer[data-ytb-removed="true"],
+ytd-video-renderer[data-ytb-removed="true"],
+ytd-grid-video-renderer[data-ytb-removed="true"],
+yt-lockup-view-model[data-ytb-removed="true"] {
+  display: block !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.ytb-removed-video-notice {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  color: #aaa;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.ytb-removed-video-notice__heading {
+  margin-bottom: 6px;
+  color: #f1f1f1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ytb-removed-video-notice__filter {
+  color: #ddd;
+}
+
+.ytb-removed-video-notice__title {
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

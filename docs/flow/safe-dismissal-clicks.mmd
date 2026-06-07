@@ -1,0 +1,14 @@
+graph TD
+    classDef pending fill:#e5e7eb,stroke:#6b7280,color:#111827
+    classDef inProgress fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef inReview fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef done fill:#d1fae5,stroke:#059669,color:#064e3b
+
+    phase-1["P1: Characterize unsafe click surface"]:::inProgress
+    phase-2["P2: Add safe gate helpers"]:::pending
+    phase-3["P3: Integrate gate and fallbacks"]:::pending
+    phase-4["P4: Verify and clean up"]:::pending
+
+    phase-1 --> phase-2
+    phase-2 --> phase-3
+    phase-3 --> phase-4
