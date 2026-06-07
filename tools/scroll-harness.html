@@ -252,6 +252,8 @@
           navigationAttempts: window.__harnessNavigationAttempts,
           cardCount: document.querySelectorAll("ytd-rich-item-renderer").length,
           popupCount: document.querySelectorAll("ytd-menu-popup-renderer").length,
+          removedNoticeCount: document.querySelectorAll("[data-ytb-removed='true'] .ytb-removed-video-notice").length,
+          removedFilters: [...document.querySelectorAll(".ytb-removed-video-notice__filter")].map((el) => el.textContent.trim()),
           logs,
         };
       },

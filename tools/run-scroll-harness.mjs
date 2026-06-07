@@ -186,6 +186,8 @@ async function runScenario(cdp, sessionId, scenario) {
   checkEqual(checks, "navigation attempts", after.navigationAttempts, scenario.expectedNavigationAttempts);
   checkEqual(checks, "card count", after.cardCount, scenario.expectedCardCount);
   checkEqual(checks, "pathname", after.pathname, scenario.expectedPathname);
+  checkEqual(checks, "removed notice count", after.removedNoticeCount, scenario.expectedRemovedNoticeCount);
+  checkEqual(checks, "removed filter text", after.removedFilters.join(" | "), scenario.expectedRemovedFilters);
   checkUrlUnchanged(checks, before, after, scenario.expectUrlUnchanged);
 
   const assertionsPassed = checks.every((check) => check.passed);
@@ -252,7 +254,9 @@ try {
       expectedMenuClicks: 0,
       expectedNotInterestedClicks: 0,
       expectedNavigationAttempts: 0,
-      expectedCardCount: 47,
+      expectedCardCount: 48,
+      expectedRemovedNoticeCount: 1,
+      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
       expectUrlUnchanged: true,
     },
     {
@@ -263,7 +267,9 @@ try {
       expectedMenuClicks: 0,
       expectedNotInterestedClicks: 0,
       expectedNavigationAttempts: 0,
-      expectedCardCount: 47,
+      expectedCardCount: 48,
+      expectedRemovedNoticeCount: 1,
+      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
       expectUrlUnchanged: true,
     },
     {
@@ -276,7 +282,9 @@ try {
       expectedMenuClicks: 0,
       expectedNotInterestedClicks: 0,
       expectedNavigationAttempts: 0,
-      expectedCardCount: 47,
+      expectedCardCount: 48,
+      expectedRemovedNoticeCount: 1,
+      expectedRemovedFilters: "Filtered by: Duration max 1:00:00 (video 2:30:00)",
       expectUrlUnchanged: true,
     },
     {
@@ -289,7 +297,9 @@ try {
       expectedMenuClicks: 0,
       expectedNotInterestedClicks: 0,
       expectedNavigationAttempts: 0,
-      expectedCardCount: 47,
+      expectedCardCount: 48,
+      expectedRemovedNoticeCount: 1,
+      expectedRemovedFilters: "Filtered by: Creation date max 365 days (video age 1825 days)",
       expectUrlUnchanged: true,
     },
     {
@@ -299,7 +309,9 @@ try {
       expectedMenuClicks: 1,
       expectedNotInterestedClicks: 1,
       expectedNavigationAttempts: 0,
-      expectedCardCount: 47,
+      expectedCardCount: 48,
+      expectedRemovedNoticeCount: 1,
+      expectedRemovedFilters: "Filtered by: Keyword: BLOCKME",
       expectUrlUnchanged: true,
     },
     {
@@ -385,7 +397,7 @@ try {
       `  before=${result.before.scrollY} after=${result.after.scrollY} ` +
       `menuClicks=${result.after.menuClicks} notInterestedClicks=${result.after.notInterestedClicks} ` +
       `staleClicks=${result.after.staleNotInterestedClicks} navigationAttempts=${result.after.navigationAttempts} ` +
-      `path=${result.after.pathname} cardCount=${result.after.cardCount}`
+      `path=${result.after.pathname} cardCount=${result.after.cardCount} removedNotices=${result.after.removedNoticeCount}`
     );
     for (const check of result.checks) {
       const checkStatus = check.passed ? "ok" : "not ok";

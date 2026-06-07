@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  if (window.__ytbContentCleanup) {
+    window.__ytbContentCleanup();
+  }
+
   const SHORTS_SELECTORS = [
     "ytd-reel-shelf-renderer",
     "ytd-rich-section-renderer:has(ytd-reel-shelf-renderer)",
@@ -47,6 +51,7 @@
 
   let currentPageType = null;
   let scanIntervalId = null;
+  let activeObserver = null;
 
   let settings = {
     shortsBlocked: true,
@@ -230,11 +235,13 @@
         "blockedChannels" in changes
       ) {
         document.querySelectorAll(VIDEO_SELECTOR).forEach((el) => {
+          if (isRemovedVideoNotice(el)) return;
           el.style.opacity = "";
           el.style.pointerEvents = "";
         });
       }
       document.querySelectorAll(VIDEO_SELECTOR).forEach((el) => {
+        if (isRemovedVideoNotice(el)) return;
         delete el.dataset.ytbScanned;
         delete el.dataset.ytbChannelScanned;
         delete el.dataset.ytbPlaylistScanned;
@@ -258,24 +265,25 @@
 
   // --- Keyword Matching ---
 
-  function matchesTextList(text, list, enabled) {
+  function getMatchingTextListItem(text, list, enabled) {
     if (!enabled || list.length === 0) {
-      return false;
+      return null;
     }
-    return list.some((item) => {
+    return list.find((item) => {
       if (item.caseSensitive) {
         return text.includes(item.text);
       }
       return text.toLowerCase().includes(item.text.toLowerCase());
-    });
+    }) || null;
   }
 
-  function matchesKeyword(title) {
-    return matchesTextList(
+  function getMatchingKeywordText(title) {
+    const keyword = getMatchingTextListItem(
       title,
       settings.keywords,
       settings.keywordDismissalEnabled
     );
+    return keyword ? keyword.text : "";
   }
 
   function normalizeMatchText(text) {
@@ -302,16 +310,19 @@
     );
   }
 
-  function getMatchingChannelText(channelTexts) {
+  function getMatchingChannelFilterText(channelTexts) {
     if (!settings.channelBlockingEnabled || settings.blockedChannels.length === 0) {
       return "";
     }
 
-    return channelTexts.find((channelText) => (
-      settings.blockedChannels.some((blockedChannel) => (
-        matchesChannelText(channelText, blockedChannel)
-      ))
-    )) || "";
+    for (const channelText of channelTexts) {
+      const blockedChannel = settings.blockedChannels.find((candidate) =>
+        matchesChannelText(channelText, candidate)
+      );
+      if (blockedChannel) return blockedChannel.text;
+    }
+
+    return "";
   }
 
   function isElementInViewport(el) {
@@ -324,22 +335,69 @@
     );
   }
 
+  function isRemovedVideoNotice(el) {
+    return el.dataset.ytbRemoved === "true";
+  }
+
+  function describeFilterMatch(filterType, filterText) {
+    const normalizedFilterType = normalizeText(String(filterType || "Filter"));
+    const normalizedFilterText = normalizeText(String(filterText || "matched rule"));
+    return normalizedFilterType + ": " + normalizedFilterText;
+  }
+
+  function renderRemovedVideoNotice(videoEl, filterDescription) {
+    if (!videoEl || !videoEl.isConnected || videoEl.dataset.ytbRemoved === "true") {
+      return;
+    }
+
+    const title = getVideoTitle(videoEl);
+    const notice = document.createElement("div");
+    notice.className = "ytb-removed-video-notice";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+
+    const heading = document.createElement("div");
+    heading.className = "ytb-removed-video-notice__heading";
+    heading.textContent = "Video removed by YTBlocker";
+
+    const filter = document.createElement("div");
+    filter.className = "ytb-removed-video-notice__filter";
+    filter.textContent = "Filtered by: " + normalizeText(filterDescription || "matched rule");
+
+    notice.append(heading, filter);
+
+    if (title) {
+      const titleLine = document.createElement("div");
+      titleLine.className = "ytb-removed-video-notice__title";
+      titleLine.textContent = title;
+      notice.appendChild(titleLine);
+    }
+
+    videoEl.dataset.ytbRemoved = "true";
+    videoEl.textContent = "";
+    videoEl.appendChild(notice);
+    videoEl.style.opacity = "";
+    videoEl.style.pointerEvents = "";
+    videoEl.removeAttribute("href");
+  }
+
   function enqueueVideoMatch(videoEl, matchType, matchedText) {
+    const filterDescription = describeFilterMatch(matchType, matchedText);
     console.log("[YTBlocker] " + matchType + " match:", matchedText);
     if (currentPageType === "search") {
-      // On search pages, remove via the paced queue — the "Not Interested"
-      // dismissal flow simulates clicks that trigger auto-navigation.
-      enqueueFilterAction(videoEl, "remove");
+      // On search pages, avoid dismissal clicks because YouTube can navigate
+      // away. Keep a visible in-page removal notice instead.
+      enqueueFilterAction(videoEl, "remove", 0, { filterDescription });
     } else if (currentPageType === "watch") {
       // Watch sidebar matching is hide-only because dismissal clicks can
-      // navigate the main player.
-      enqueueFilterAction(videoEl, "hide");
+      // navigate the main player. Still render the standard removed-video HTML.
+      enqueueFilterAction(videoEl, "hide", 0, { filterDescription });
     } else if (!isElementInViewport(videoEl)) {
       // Offscreen menu clicks are what cause YouTube to snap the viewport to
       // newly-loaded matches. Keep those background mutations DOM-only.
-      enqueueFilterAction(videoEl, "remove");
+      enqueueFilterAction(videoEl, "remove", 0, { filterDescription });
     } else {
-      enqueueFilterAction(videoEl, "dismiss");
+      enqueueFilterAction(videoEl, "dismiss", 0, { filterDescription });
     }
   }
 
@@ -354,6 +412,7 @@
     let matched = false;
 
     allVideos.forEach((el) => {
+      if (isRemovedVideoNotice(el)) return;
       if (el.dataset.ytbScanned) { scannedCount++; return; }
 
       const title = getVideoTitle(el);
@@ -362,8 +421,9 @@
       newCount++;
       el.dataset.ytbScanned = "true";
 
-      if (matchesKeyword(title)) {
-        enqueueVideoMatch(el, "Keyword", title);
+      const matchingKeywordText = getMatchingKeywordText(title);
+      if (matchingKeywordText) {
+        enqueueVideoMatch(el, "Keyword", matchingKeywordText);
         matched = true;
       }
     });
@@ -391,6 +451,7 @@
     let matched = false;
 
     allVideos.forEach((el) => {
+      if (isRemovedVideoNotice(el)) return;
       if (el.dataset.ytbChannelScanned) { scannedCount++; return; }
 
       const channelTexts = getChannelTexts(el);
@@ -399,9 +460,9 @@
       newCount++;
       el.dataset.ytbChannelScanned = "true";
 
-      const matchingChannelText = getMatchingChannelText(channelTexts);
-      if (matchingChannelText) {
-        enqueueVideoMatch(el, "Channel", matchingChannelText);
+      const matchingChannelFilterText = getMatchingChannelFilterText(channelTexts);
+      if (matchingChannelFilterText) {
+        enqueueVideoMatch(el, "Channel", matchingChannelFilterText);
         matched = true;
       }
     });
@@ -498,6 +559,26 @@
     return parseClockDuration(videoEl.textContent);
   }
 
+  function formatSecondsForNotice(totalSeconds) {
+    const seconds = Math.round(totalSeconds);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    if (hours > 0) {
+      return hours + ":" + String(minutes).padStart(2, "0") + ":" + String(remainder).padStart(2, "0");
+    }
+    return minutes + ":" + String(remainder).padStart(2, "0");
+  }
+
+  function describeDurationFilter(durationSeconds) {
+    const minSeconds = normalizeDurationBound(settings.videoDurationMinSeconds);
+    const maxSeconds = normalizeDurationBound(settings.videoDurationMaxSeconds);
+    const bounds = [];
+    if (minSeconds >= 0) bounds.push("min " + formatSecondsForNotice(minSeconds));
+    if (maxSeconds >= 0) bounds.push("max " + formatSecondsForNotice(maxSeconds));
+    return "Duration " + bounds.join(", ") + " (video " + formatSecondsForNotice(durationSeconds) + ")";
+  }
+
   function isDurationWithinBounds(durationSeconds) {
     const minSeconds = normalizeDurationBound(settings.videoDurationMinSeconds);
     const maxSeconds = normalizeDurationBound(settings.videoDurationMaxSeconds);
@@ -515,6 +596,7 @@
     let queuedCount = 0;
 
     allVideos.forEach((el) => {
+      if (isRemovedVideoNotice(el)) return;
       if (el.dataset.ytbDurationScanned) { scannedCount++; return; }
 
       const durationSeconds = getVideoDurationSeconds(el);
@@ -528,7 +610,9 @@
           getVideoTitle(el) || "(unknown)",
           "durationSeconds=" + durationSeconds
         );
-        enqueueFilterAction(el, "remove");
+        enqueueFilterAction(el, "remove", 0, {
+          filterDescription: describeDurationFilter(durationSeconds),
+        });
         queuedCount++;
       }
     });
@@ -613,6 +697,22 @@
     return parseVideoAgeLabel(videoEl.textContent);
   }
 
+  function formatDaysForNotice(days) {
+    const roundedDays = Math.round(days * 10) / 10;
+    if (roundedDays < 1) return "less than 1 day";
+    if (roundedDays === 1) return "1 day";
+    return roundedDays + " days";
+  }
+
+  function describeAgeFilter(ageDays) {
+    const minDays = normalizeAgeBound(settings.videoAgeMinDays);
+    const maxDays = normalizeAgeBound(settings.videoAgeMaxDays);
+    const bounds = [];
+    if (minDays >= 0) bounds.push("min " + formatDaysForNotice(minDays));
+    if (maxDays >= 0) bounds.push("max " + formatDaysForNotice(maxDays));
+    return "Creation date " + bounds.join(", ") + " (video age " + formatDaysForNotice(ageDays) + ")";
+  }
+
   function isAgeWithinBounds(ageDays) {
     const minDays = normalizeAgeBound(settings.videoAgeMinDays);
     const maxDays = normalizeAgeBound(settings.videoAgeMaxDays);
@@ -630,6 +730,7 @@
     let queuedCount = 0;
 
     allVideos.forEach((el) => {
+      if (isRemovedVideoNotice(el)) return;
       if (el.dataset.ytbAgeScanned) { scannedCount++; return; }
 
       const ageDays = getVideoAgeDays(el);
@@ -643,7 +744,9 @@
           getVideoTitle(el) || "(unknown)",
           "ageDays=" + ageDays
         );
-        enqueueFilterAction(el, "remove");
+        enqueueFilterAction(el, "remove", 0, {
+          filterDescription: describeAgeFilter(ageDays),
+        });
         queuedCount++;
       }
     });
@@ -735,6 +838,7 @@
     let matched = false;
 
     allVideos.forEach((el) => {
+      if (isRemovedVideoNotice(el)) return;
       if (el.dataset.ytbPlaylistScanned) return;
 
       const playlistId = getPlaylistId(el);
@@ -745,7 +849,10 @@
       if (playlistId && blockedPlaylistIds.has(playlistId)) {
         console.log("[YTBlocker] Reinserted playlist queued for removal:", playlistId);
         el.dataset.ytbPlaylistScanned = "true";
-        enqueueFilterAction(el, "remove", 0, { playlistId });
+        enqueueFilterAction(el, "remove", 0, {
+          playlistId,
+          filterDescription: describeFilterMatch("Playlist", playlistId || "previously blocked playlist"),
+        });
         matched = true;
         return;
       }
@@ -761,13 +868,23 @@
         "items=" + (playlistCount || "unknown"),
         "id=" + (playlistId || "(unknown)")
       );
+      const playlistFilterDescription = describeFilterMatch(
+        "Playlist",
+        playlistId || getVideoTitle(el) || "playlist card"
+      );
       if (!isElementInViewport(el)) {
         if (playlistId) {
           blockedPlaylistIds.add(playlistId);
         }
-        enqueueFilterAction(el, "remove", 0, { playlistId });
+        enqueueFilterAction(el, "remove", 0, {
+          playlistId,
+          filterDescription: playlistFilterDescription,
+        });
       } else {
-        enqueueFilterAction(el, "block-playlist", 0, { playlistId });
+        enqueueFilterAction(el, "block-playlist", 0, {
+          playlistId,
+          filterDescription: playlistFilterDescription,
+        });
       }
       matched = true;
     });
@@ -1356,15 +1473,8 @@
   // not move the user's viewport as YouTube menus and cards change.
   async function performQueuedFilterAction(videoEl, action, metadata) {
     return withScrollPreserved(async (restoreScroll) => {
-      if (action === "remove") {
-        videoEl.remove();
-        restoreScroll();
-        return true;
-      }
-
-      if (action === "hide") {
-        videoEl.style.opacity = "0";
-        videoEl.style.pointerEvents = "none";
+      if (action === "remove" || action === "hide") {
+        renderRemovedVideoNotice(videoEl, metadata.filterDescription);
         restoreScroll();
         return true;
       }
@@ -1377,18 +1487,23 @@
         const success = await clickNotInterested(videoEl, restoreScroll);
         if (videoEl.isConnected) {
           console.log(
-            "[YTBlocker] Removing playlist card after dismissal attempt. id=" +
+            "[YTBlocker] Showing playlist removal notice after dismissal attempt. id=" +
               (metadata.playlistId || "(unknown)") +
               " notInterestedClicked=" +
               success
           );
-          videoEl.remove();
+          renderRemovedVideoNotice(videoEl, metadata.filterDescription);
           restoreScroll();
         }
         return success;
       }
 
-      return clickNotInterested(videoEl, restoreScroll);
+      const success = await clickNotInterested(videoEl, restoreScroll);
+      if (success && videoEl.isConnected) {
+        renderRemovedVideoNotice(videoEl, metadata.filterDescription);
+        restoreScroll();
+      }
+      return success;
     }, videoEl);
   }
 
@@ -1458,11 +1573,13 @@
     }
   }
 
-  document.addEventListener("visibilitychange", () => {
+  function handleVisibilityChange() {
     if (!document.hidden && dismissalQueue.length > 0 && !isProcessingQueue) {
       processQueue();
     }
-  });
+  }
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 
   // --- MutationObserver ---
 
@@ -1492,7 +1609,7 @@
     if (document.body) {
       startObserver();
     } else {
-      document.addEventListener("DOMContentLoaded", startObserver);
+      document.addEventListener("DOMContentLoaded", startObserver, { once: true });
     }
   }
 
@@ -1508,6 +1625,7 @@
     if (currentPageType !== null) {
       // Reset scan markers — new page has new content
       document.querySelectorAll(VIDEO_SELECTOR).forEach((el) => {
+        if (isRemovedVideoNotice(el)) return;
         delete el.dataset.ytbScanned;
         delete el.dataset.ytbChannelScanned;
         delete el.dataset.ytbPlaylistScanned;
@@ -1523,8 +1641,12 @@
   }
 
   function startObserver() {
-    const observer = new MutationObserver(onMutation);
-    observer.observe(document.body, {
+    if (activeObserver) {
+      activeObserver.disconnect();
+    }
+
+    activeObserver = new MutationObserver(onMutation);
+    activeObserver.observe(document.body, {
       childList: true,
       subtree: true,
     });
@@ -1532,6 +1654,20 @@
     document.addEventListener("yt-navigate-finish", onNavigate);
     onNavigate();
   }
+
+  window.__ytbContentCleanup = function () {
+    clearInterval(scanIntervalId);
+    scanIntervalId = null;
+    clearTimeout(debounceTimer);
+    resetDismissalQueue(true);
+    if (activeObserver) {
+      activeObserver.disconnect();
+      activeObserver = null;
+    }
+    document.removeEventListener("yt-navigate-finish", onNavigate);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    document.removeEventListener("DOMContentLoaded", startObserver);
+  };
 
   init();
 })();
